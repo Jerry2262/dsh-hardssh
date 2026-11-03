@@ -201,7 +201,13 @@ export class SshEngine {
     this.terminalService = new TerminalService({
       connectStandalone: async (alias) => {
         const entry = store.find(alias)
-        if (entry === undefined) throw new Error(`alias '${alias}' not found —add it first`)
+        if (entry === undefined) {
+          const available = store.list().map(candidate => candidate.alias)
+          throw new Error(
+            `alias '${alias}' not found — add it first` +
+            (available.length > 0 ? ` (available aliases: ${available.join(', ')})` : ''),
+          )
+        }
         return await this.manager.connectChain(entry)
       },
     })

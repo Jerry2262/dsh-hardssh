@@ -125,6 +125,18 @@ describe('ssh_list', () => {
     expect(text).toContain('web-01')
     expect(text).toContain('10.0.0.1')
   })
+
+  it('declares commandPolicy in the host item schema (summaries with policies validate)', () => {
+    const tool = sshListTool(engine(new StubEngine()))
+    const schema = tool.output?.schema as {
+      properties?: { hosts?: { items?: { properties?: Record<string, unknown> } } }
+    }
+    const item = schema.properties?.hosts?.items
+    expect(item).toBeDefined()
+    const policy = item!.properties?.commandPolicy as { properties?: Record<string, unknown> } | undefined
+    expect(policy).toBeDefined()
+    expect(Object.keys(policy!.properties ?? {}).sort()).toEqual(['allowCommands', 'deny', 'denyCommands', 'hint'])
+  })
 })
 
 describe('ssh_exec', () => {

@@ -39,7 +39,7 @@ export interface SshCommandPolicy {
    * One regular expression per line/entry, matched case-insensitively against
    * the command line. An entry that is blank or starts with `#` is ignored.
    */
-  deny: string[]
+  deny?: string[]
   /**
    * Command basenames denied after unwrap (e.g. `python`, `python3`, `Rscript`).
    * `bash -c "python …"`, `sudo -u me python …`, `/usr/bin/python3 …` and

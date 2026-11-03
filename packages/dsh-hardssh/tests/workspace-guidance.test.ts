@@ -36,6 +36,11 @@ describe('workspace guidance', () => {
     // The binding facts stay accurate.
     expect(text).toContain('prod')
     expect(text).toContain('/srv/app')
+    // The alias is the argument every ssh_* tool takes; the title is only a
+    // display name, so the guidance must say so explicitly (P0: a model used
+    // the workspace title as the ssh_exec alias).
+    expect(text).toContain('主机别名是 `prod`')
+    expect(text).toContain('alias 参数用 `prod`')
   })
 
   it('keeps the local-session branch describing full local tool availability', () => {

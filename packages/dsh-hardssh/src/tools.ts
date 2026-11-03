@@ -109,9 +109,11 @@ export function makeWorkspaceTools(deps: WorkspaceToolsDeps) {
         render: (_args, value) => {
           if (value.ok !== true) return text(`remote_status failed: ${value.error ?? 'unknown error'}`)
           const list = (value.workspaces ?? []).map((w: { title: string; alias: string; remoteRoot: string; anchorPath: string }) =>
-            `- ${w.title}  (${w.alias} @ ${w.remoteRoot}, anchor ${w.anchorPath})`)
+            `- ${w.alias} @ ${w.remoteRoot}  (工作区「${w.title}」, anchor ${w.anchorPath})`)
+          // Alias first: every ssh_* tool takes the alias, while the title is
+          // only a display name (and users often name a workspace like a host).
           const boundText = value.bound === true
-            ? `current session: BOUND -> ${value.workspaceTitle ?? ''} (${value.alias ?? ''} @ ${value.remoteRoot ?? ''})`
+            ? `current session: BOUND -> ${value.alias ?? ''} @ ${value.remoteRoot ?? ''} (workspace 「${value.workspaceTitle ?? ''}」; ssh_* tools take the alias "${value.alias ?? ''}")`
             : 'current session: NOT bound (this workspace is local)'
           return text([boundText, '', 'SSH workspaces:', ...(list.length > 0 ? list : ['(none)'])].join('\n'))
         },
