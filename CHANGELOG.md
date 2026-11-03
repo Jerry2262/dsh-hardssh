@@ -12,6 +12,12 @@
 - 保留既有的本地路径校验：内核 flow 交回的路径仍先经过根目录/相对路径检查再交给宿主，避免创建无法打开会话的工作区。
 - 测试：SSH 分支的请求时序与禁用状态；本地分支渲染内核 occupant 及其 injected 面、路径透传、根目录拒绝、取消透传、内核 occupant 缺失时的错误提示。
 
+### 修复：本地工作区与 SSH 工作区同名时误挂远端徽章
+
+- 根因：侧栏徽章装饰按工作区**标题**匹配 SSH 记录（`workspace-badges.ts` 的 `byTitle`）。原生的身份是 canonical 路径、标题只是显示名，允许不同工作区同名（`/home/jerry/tmp` 与 `/home/jerry/chat/tmp` 都叫 `tmp`），于是同名的本地工作区行也被标成远端。
+- 修复：按原生模型绑定身份——用 SSH 记录的 anchor 路径匹配原生工作区列表里的 canonical `path`，取得 `workspaceId`，再按原生行的 `data-row-key="workspace:<id>"` 装饰；标题不再参与匹配。旧 shell 没有行 key 时才用标题兜底，且仅当该标题在 SSH 记录中唯一；未绑定的行会清掉残留徽章。
+- 验证：新增 `badgeBindings` + jsdom 行装饰测试（同名本地/SSH、残留徽章清理、唯一标题兜底）；隔离环境实测修复前两个 `tmp` 行都带 aliyun 徽章，修复后只有 SSH 锚点行带徽章。
+
 ### 清理：删除其余旧版本兼容代码
 
 - 删除旧 SSH 账本导入整条链路：`runtime/workspace-migration.ts`（legacy→generic 迁移、cutover marker、shadow 对比）、`ledgerPath()`、启动时的一次性迁移与基于 marker 的恢复、`migration-report.json` / `recovery-report.json`。启动现在只有一条路径：检查账本 → 从 `.last-good` 或最新备份恢复 → 初始化；账本损坏且无可恢复源时 fail closed。`GenericBootOptions` 只剩 `genericPath`。

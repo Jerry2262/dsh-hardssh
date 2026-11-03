@@ -26,7 +26,7 @@ import { setLanguage, tt } from './text.ts'
 import { registerWorkspacePanel } from './workspace-panel-entry.tsx'
 import { DirectoryFlow, type NativeDirectoryFlowHandle } from './directory-flow.tsx'
 import { connectHost, subscribeConnectState } from './connect-host.ts'
-import { mountWorkspaceBadges } from './workspace-badges.ts'
+import { badgeBindings, mountWorkspaceBadges, type NativeWorkspacesLike } from './workspace-badges.ts'
 import { mountWorkspaceFilesPathRemap } from './workspace-files-path.ts'
 import { makeAnchorAliasResolver, mountSessionConnectGate, type SessionGateList } from './session-connect-gate.ts'
 import { mountSshOperations } from './ssh/apply.ts'
@@ -54,7 +54,7 @@ export type { SshKey } from './ssh/locales.ts'
  *  it Cordis may activate this client before a provider offers the service;
  *  the guarded registration then degrades silently and no HardSSH surface
  *  exists. */
-export const inject = ['slots', 'locale', 'sessions', 'sidebarRightTabs']
+export const inject = ['slots', 'locale', 'sessions', 'sidebarRightTabs', 'workspaces']
 
 /** The kernel's directory-flow registrations, as the slot ledger exposes them. */
 interface LedgerEntry {
@@ -149,6 +149,10 @@ export function apply(ctx: ClientContext): void {
   const api = new WorkspaceApi()
   const sshApi = new SshApi()
   const manager = new WorkspaceManager(api)
+  // Native client workspace state: the source of row identity. A sidebar row's
+  // `data-row-key` carries the native workspace id, and the native registry
+  // owns the canonical path — titles are display-only and may repeat.
+  const nativeWorkspaces = ctx.get('workspaces') as unknown as NativeWorkspacesLike | undefined
   const sessionList = ctx.sessions.list
   let warnedSessionListShape = false
   const sessions: SessionGateList = {
@@ -191,9 +195,11 @@ export function apply(ctx: ClientContext): void {
 
     manager.start()
 
-    // Sidebar row decoration: label every host workspace whose title belongs to
-    // an SSH-bound workspace with a compact `alias` badge, tinted by whether the
-    // server currently holds a pooled connection. The shell still exposes no
+    // Sidebar row decoration: label the host workspace rows that BIND to an
+    // SSH workspace (canonical anchor path → native workspace id) with a compact
+    // `alias` badge, tinted by whether the server currently holds a pooled
+    // connection. Titles are display-only natively and may repeat, so a
+    // same-named local workspace is never decorated. The shell still exposes no
     // row-decoration slot, so this stays the documented DOM extension it always
     // was (MutationObserver self-heal), unlike the session list below.
     let badgesDispose: (() => void) | undefined
@@ -203,14 +209,14 @@ export function apply(ctx: ClientContext): void {
     const refreshBadges = (): void => {
       try {
         const workspaces = manager.getSnapshot().workspaces
+        const nativeRows = nativeWorkspaces?.list.getSnapshot().items ?? []
         badgesDispose?.()
-        badgesDispose = mountWorkspaceBadges(workspaces.map((workspace) => ({
-          id: workspace.id,
-          title: workspace.title,
-          alias: workspace.alias,
-          remoteRoot: workspace.remoteRoot,
-          anchorPath: workspace.anchorPath,
-        })), connectedAliases, connectingAliases)
+        badgesDispose = mountWorkspaceBadges(
+          workspaces,
+          badgeBindings(nativeRows, workspaces),
+          connectedAliases,
+          connectingAliases,
+        )
         // The native file panel's address (anchor) is rewritten to the remote
         // root by the same workspace state (P1/UX-1).
         filesPathDispose?.()
@@ -226,6 +232,11 @@ export function apply(ctx: ClientContext): void {
     // Same-source sync: no independent workspace fetch — the manager emits on
     // its 3s poll and on create/remove/rename.
     disposers.push(manager.subscribe(() => { refreshBadges() }))
+    // Native workspace rows arrive/rename/delete through their own store; the
+    // anchor path → workspace id binding must refresh with it.
+    if (nativeWorkspaces !== undefined) {
+      disposers.push(nativeWorkspaces.list.subscribe(() => { refreshBadges() }))
+    }
 
     // Connecting-state feed: while `connectHost` probes/prompts an alias the
     // sidebar badge shows the spinner; on settle (success or failure) it flips

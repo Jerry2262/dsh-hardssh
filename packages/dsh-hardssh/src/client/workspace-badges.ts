@@ -7,18 +7,79 @@
  * MutationObserver self-heals when React re-renders displace the injected
  * badge.
  *
- * The row title alone matches: SSH-bound workspace titles are unique enough
- * in practice (the ledger title is what the row shows). A title match against
- * `~/.dsh/ssh-workspaces/<id>` anchors also works when the host picks that
- * default title.
+ * Matching follows the native model: a workspace's identity is its canonical
+ * path, and its title is only a display name that different workspaces may
+ * share (a local `/home/jerry/tmp` and an SSH workspace titled `tmp` coexist).
+ * The plugin therefore binds each SSH record's anchor path to the native
+ * workspace that owns it and decorates the row by that workspace id
+ * (`data-row-key="workspace:<id>"`), never by the title.
  *
  * @module dsh-hardssh/client/workspace-badges
  */
 
-import { anchorLabels, replaceAnchorPaths } from './anchor-display.ts'
+import { anchorLabels, normalizeDisplayPath, replaceAnchorPaths } from './anchor-display.ts'
 
 const PROJECT_ROW_SELECTOR = '[class*="projectRow"]'
 const TITLE_SELECTOR = '[class*="title"]'
+
+/** The slice of one native client workspace row the badge binding needs. */
+export interface NativeWorkspaceRowLike {
+  workspaceId: string
+  /** Canonical directory the native registry created the workspace for. */
+  path: string
+}
+
+/** The slice of the native client workspace service (`ctx.get('workspaces')`). */
+export interface NativeWorkspacesLike {
+  list: {
+    getSnapshot(): { items: readonly NativeWorkspaceRowLike[] }
+    subscribe(listener: () => void): () => void
+  }
+}
+
+/** One SSH workspace record, as the badge binder sees it. */
+export interface SshWorkspaceLike {
+  id: string
+  title: string
+  alias: string
+  remoteRoot: string
+  anchorPath?: string
+}
+
+/** The badge a bound native workspace row shows. */
+export interface WorkspaceBadgeTarget {
+  alias: string
+  remoteRoot: string
+}
+
+/**
+ * Bind native workspace ids to the SSH records that own them.
+ *
+ * Native identity is the canonical workspace PATH (the registry's uniqueness
+ * key), so the anchor path is the join: the native workspace whose `path` is
+ * the record's anchor directory gets the badge. Titles never take part — two
+ * workspaces may legitimately share one.
+ *
+ * @param nativeWorkspaces - native client workspace rows (`items`).
+ * @param sshWorkspaces - SSH-bound workspace records.
+ * @returns native workspace id → the badge to render for that row.
+ */
+export function badgeBindings(
+  nativeWorkspaces: readonly NativeWorkspaceRowLike[],
+  sshWorkspaces: readonly SshWorkspaceLike[],
+): Map<string, WorkspaceBadgeTarget> {
+  const byAnchor = new Map<string, SshWorkspaceLike>()
+  for (const workspace of sshWorkspaces) {
+    if (workspace.anchorPath === undefined || workspace.anchorPath === '') continue
+    byAnchor.set(normalizeDisplayPath(workspace.anchorPath), workspace)
+  }
+  const bindings = new Map<string, WorkspaceBadgeTarget>()
+  for (const row of nativeWorkspaces) {
+    const ssh = byAnchor.get(normalizeDisplayPath(row.path))
+    if (ssh !== undefined) bindings.set(row.workspaceId, { alias: ssh.alias, remoteRoot: ssh.remoteRoot })
+  }
+  return bindings
+}
 
 /** Render a small remote badge element. The cloud icon marks "remote";
  *  connected servers render in DeepSeek blue, disconnected stay gray; a
@@ -66,24 +127,51 @@ function ensureSpinnerStyle(): void {
   document.head.append(style)
 }
 
+/** Title → badge for titles exactly ONE SSH record carries (fallback path only). */
+function unambiguousTitleTargets(
+  workspaces: readonly SshWorkspaceLike[],
+): Map<string, WorkspaceBadgeTarget> {
+  const counts = new Map<string, number>()
+  for (const workspace of workspaces) counts.set(workspace.title, (counts.get(workspace.title) ?? 0) + 1)
+  const targets = new Map<string, WorkspaceBadgeTarget>()
+  for (const workspace of workspaces) {
+    if (counts.get(workspace.title) !== 1) continue
+    targets.set(workspace.title, { alias: workspace.alias, remoteRoot: workspace.remoteRoot })
+  }
+  return targets
+}
+
 /**
  * Mount the row-decoration pass. Queries the sidebar for project rows and
- * appends a remote badge when the row's title belongs to an SSH workspace.
- * Badges of aliases in `connected` render blue, others gray. Self-heals via
+ * appends a remote badge to the rows native workspaces bind to an SSH record
+ * (matched by canonical path → workspace id), never by title. Badges of
+ * aliases in `connected` render blue, others gray. Self-heals via
  * MutationObserver on the sidebar container (rows re-render on
  * session/workspace changes).
- * @param workspaces - the SSH workspace records (id/title/alias/remoteRoot).
+ * @param workspaces - the SSH workspace records (anchor/title/alias/remoteRoot).
+ * @param bindings - native workspace id → badge, from {@link badgeBindings}.
  * @param connected - aliases with a live pooled connection (badge coloring).
  * @param connecting - aliases currently probing/connecting (spinner badge).
  * @returns disposer.
  */
 export function mountWorkspaceBadges(
-  workspaces: Array<{ id: string; title: string; alias: string; remoteRoot: string; anchorPath?: string }>,
+  workspaces: ReadonlyArray<SshWorkspaceLike>,
+  bindings: ReadonlyMap<string, WorkspaceBadgeTarget>,
   connected?: ReadonlySet<string>,
   connecting?: ReadonlySet<string>,
 ): () => void {
-  const byTitle = new Map<string, { alias: string; remoteRoot: string }>()
-  for (const workspace of workspaces) byTitle.set(workspace.title, workspace)
+  // Older shells expose no `data-row-key`; their fallback may only use a title
+  // that exactly one SSH record carries (ambiguous titles stay undecorated).
+  const byUniqueTitle = unambiguousTitleTargets(workspaces)
+  /** Resolve the SSH record a project row stands for: native id first, then title. */
+  const targetForRow = (row: HTMLElement, titleEl: HTMLElement): WorkspaceBadgeTarget | undefined => {
+    const key = row.getAttribute('data-row-key')
+    if (key !== null) {
+      const workspaceId = key.startsWith('workspace:') ? key.slice('workspace:'.length) : ''
+      return workspaceId === '' ? undefined : bindings.get(workspaceId)
+    }
+    return byUniqueTitle.get(titleEl.textContent?.trim() ?? '')
+  }
   // Local anchor (and its forward-slash spelling) → the remote label the shell
   // hover card should display; shared with the file-panel address rewrite.
   const labels = anchorLabels(workspaces)
@@ -102,9 +190,13 @@ export function mountWorkspaceBadges(
   const decorate = (row: HTMLElement): void => {
     const titleEl = row.querySelector<HTMLElement>(TITLE_SELECTOR)
     if (titleEl === null || titleEl === undefined) return
-    const title = titleEl.textContent?.trim() ?? ''
-    const target = byTitle.get(title)
-    if (target === undefined) return
+    const target = targetForRow(row, titleEl)
+    const existing = row.querySelector<HTMLElement>('[data-ssh-badge]')
+    if (target === undefined) {
+      // A stale badge (record removed, workspace unregistered) must not linger.
+      if (existing !== null) existing.remove()
+      return
+    }
     // Heal a title this plugin used to set, and drop a shell-provided <title>
     // whose text is the local anchor (that would be a native duplicate of the
     // bubble `patchTooltips` already fixes).
@@ -114,11 +206,15 @@ export function mountWorkspaceBadges(
     const state = connecting?.has(target.alias) === true
       ? 'connecting'
       : connected?.has(target.alias) === true ? 'connected' : 'disconnected'
-    const existing = row.querySelector<HTMLElement>('[data-ssh-badge]')
+    const expectedTitle = `${target.remoteRoot}（${target.alias}）`
     if (existing !== null) {
-      // Update the existing badge in place so a connect-state flip (spinner ⇄
-      // cloud) is visible without remounting the whole row.
-      if (existing.dataset.sshBadge !== state) {
+      // Update in place so a connect-state flip (spinner ⇄ cloud) is visible
+      // without remounting the row; replace when the bound target changed.
+      if (
+        existing.dataset.sshBadge !== state
+        || existing.title !== expectedTitle
+        || existing.textContent !== target.alias
+      ) {
         existing.replaceWith(makeBadge(target.alias, target.remoteRoot, state))
       }
       return
