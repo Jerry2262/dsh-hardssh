@@ -13,8 +13,6 @@ import {
   VaultAuthError,
   VaultLockoutError,
   VaultLockedError,
-  legacyVaultPath,
-  migrateLegacyVault,
   sha3_256Hex,
   vaultPath,
   type VaultKdfParams,
@@ -258,24 +256,6 @@ describe('Vault', { timeout: 60_000 }, () => {
  * and env-based auto-unlock is an explicit opt-in rather than a default.
  */
 describe('Vault credential surface (P1-3)', () => {
-  it('lives outside the fs seam local roots and migrates a pre-relocation file', () => {
-    // `~/.dsh/ssh-secrets/dsh-ssh-vault.json` — NOT `~/.dsh/dsh-ssh-vault.json`,
-    // and the directory is passed to SwitchFileSystem.deniedRoots by fs.ts.
-    expect(vaultPath()).toContain(join('.dsh', 'ssh-secrets'))
-    expect(vaultPath()).not.toBe(legacyVaultPath())
-
-    const dir = mkdtempSync(join(tmpdir(), 'vault-migrate-'))
-    const legacy = join(dir, 'dsh-ssh-vault.json')
-    const target = join(dir, 'ssh-secrets', 'dsh-ssh-vault.json')
-    writeFileSync(legacy, '{"version":1}', { mode: 0o600 })
-
-    expect(migrateLegacyVault(target, legacy)).toBe(true)
-    expect(existsSync(legacy)).toBe(false)
-    expect(readFileSync(target, 'utf8')).toBe('{"version":1}')
-    // Idempotent, and never clobbers an existing destination.
-    expect(migrateLegacyVault(target, legacy)).toBe(false)
-  })
-
   it('does not auto-unlock from DSH_CREDENTIAL_PASSWORD unless explicitly allowed', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'vault-env-'))
     const path = join(dir, 'vault.json')

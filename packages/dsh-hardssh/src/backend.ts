@@ -67,15 +67,13 @@ export interface WorkspaceStoreView {
 
 /**
  * Project one generic SSH `WorkspaceRecord` into the client `SshWorkspaceRecord`
- * DTO (id/title/alias/remoteRoot/anchorPath/createdAt). The wire contract is
- * preserved server-side; no client or protocol change accompanies the cutover.
- * A generic ledger hands out provider-agnostic WorkspaceRecord values, so the
- * projection cannot reuse any legacy accessor — it exists once for the generic
- * record source.
+ * DTO (id/title/alias/remoteRoot/anchorPath/createdAt). A generic ledger hands
+ * out provider-agnostic WorkspaceRecord values, so the projection is the single
+ * place that narrows a record to the SSH DTO shape.
  */
 function toSshWorkspaceDto(record: WorkspaceRecord): SshWorkspaceRecord {
-  // A legacy alias maps 1:1 to provider.connectionRef.{id,alias} (migration
-  // keeps both equal); prefer the display alias, falling back to the ref id.
+  // provider.connectionRef carries the host alias in both id and alias;
+  // prefer the display alias, falling back to the ref id.
   const alias = record.provider.connectionRef?.alias ?? record.provider.connectionRef?.id ?? ''
   // Every SSH record created through this plugin carries a managed anchor; a
   // hand-made record without one projects an empty anchor (never throws, so

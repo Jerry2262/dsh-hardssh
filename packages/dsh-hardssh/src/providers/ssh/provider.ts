@@ -2,7 +2,7 @@
  * SSH provider — wraps the SSH engine/host store as a generic
  * `WorkspaceProvider`, so the workspace base can route SSH-bound workspaces
  * without knowing anything about ssh2. This is the concrete "provider-ssh"
- * layer: everything SSH lives here (or in the legacy ./ssh, ./remote
+ * layer: everything SSH lives here (or in the ./ssh, ./remote
  * modules it adapts), and the base + runtime never import it directly by
  * type.
  *

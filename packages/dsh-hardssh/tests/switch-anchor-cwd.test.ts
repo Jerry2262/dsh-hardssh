@@ -30,7 +30,6 @@ import { translateAnchorPath } from '../src/switch/anchor-path.ts'
 import { WorkspaceLedger } from '../src/base/ledger.ts'
 import { WorkspaceProviderRegistry } from '../src/base/registry.ts'
 import { DefaultWorkspaceCore } from '../src/runtime/workspace-core.ts'
-import { legacySshRecordToWorkspaceRecord } from '../src/runtime/workspace-migration.ts'
 import { createSshWorkspaceProvider } from '../src/providers/ssh/provider.ts'
 import { anchorWorldFor, genericFsWorldFor, genericFsWorldForNamespace } from '../src/fs.ts'
 import { FakeEngine, asSshEngine } from './providers/fake-ssh-engine.ts'
@@ -45,6 +44,20 @@ const stdio = { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' } as const
 
 function remoteWorld(backend: FileSystem) {
   return { backend, namespace: NAMESPACE, anchorPath: ANCHOR, remoteRoot: REMOTE_ROOT }
+}
+
+/** Project an SSH workspace fixture into the generic ledger record shape. */
+function toWorkspaceRecord(record: SshWorkspaceRecord) {
+  return {
+    schemaVersion: 1 as const,
+    id: record.id,
+    title: record.title,
+    provider: { id: 'ssh', connectionRef: { id: record.alias, alias: record.alias } },
+    location: { kind: 'posix' as const, root: record.remoteRoot },
+    anchor: { path: record.anchorPath, mode: 'managed' as const },
+    createdAt: record.createdAt,
+    updatedAt: record.createdAt,
+  }
 }
 
 describe('anchor cwd translation (POSIX anchor)', () => {
@@ -138,7 +151,7 @@ describe('project-root walk with a POSIX anchor (the walk must never abort)', ()
       id: 'ws-1', title: 'proj', alias: 'host', remoteRoot: '/srv/app', anchorPath: anchor, createdAt: '2025-01-01T00:00:00.000Z',
     }
     const ledgerPath = join(ledgerDir, 'index.json')
-    writeFileSync(ledgerPath, JSON.stringify([legacySshRecordToWorkspaceRecord(record)]), 'utf8')
+    writeFileSync(ledgerPath, JSON.stringify([toWorkspaceRecord(record)]), 'utf8')
     const ctx = new Context()
     const providers = new WorkspaceProviderRegistry()
     providers.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), ctx))

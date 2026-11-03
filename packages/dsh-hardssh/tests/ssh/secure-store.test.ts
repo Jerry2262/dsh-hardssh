@@ -56,7 +56,7 @@ describe('SecureHostStore (none mode — VSCode Remote-SSH style)', () => {
     expect(raw).not.toContain('s3cret!')
   })
 
-  it('resolveAuth in none mode falls back to inline (legacy v1) or empty', async () => {
+  it('resolveAuth in none mode falls back to inline secrets in hand-edited files, or empty', async () => {
     const { store } = makeStore('none')
     const entry = await store.create(passwordPayload)
     // After create, the persisted entry has no password (none mode strips it).

@@ -21,7 +21,7 @@ import type { FileSystem } from '@deepseek-ai/dsh-fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { anchorRoot, isPathUnderAnchor } from './ledger.ts'
-import { vaultDirectory, legacyVaultPath } from './ssh/vault.ts'
+import { vaultDirectory } from './ssh/vault.ts'
 import { WFS_NAMESPACE_MARKER, SwitchFileSystem, type WorkspaceWorld } from './switch/switch-fs.ts'
 import type { WorkspaceCore } from './runtime/workspace-core.ts'
 import type { WorkspaceRecord } from './base/model.ts'
@@ -174,7 +174,7 @@ export function apply(ctx: Context): void {
     // offline-attack — the ciphertext through the routed filesystem. The
     // pre-relocation path is denied too, because a failed move deliberately
     // leaves the original file in place.
-    deniedRoots: [vaultDirectory(), legacyVaultPath()],
+    deniedRoots: [vaultDirectory()],
     worldForAnchorPath: (path) => {
       const ws = workspaceCore()
       if (ws === undefined) {

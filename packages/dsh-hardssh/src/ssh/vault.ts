@@ -110,40 +110,6 @@ export function vaultPath(): string {
   return join(vaultDirectory(), 'dsh-ssh-vault.json')
 }
 
-/** Pre-relocation vault location (<home>/.dsh/dsh-ssh-vault.json). */
-export function legacyVaultPath(): string {
-  return dshHomePath('dsh-ssh-vault.json')
-}
-
-/**
- * Move a pre-relocation vault into {@link vaultDirectory} on first use.
- *
- * Never destructive: the new location wins when both exist, and a failed move
- * falls back to copying so the source file is left in place.
- *
- * @param target - destination path (defaults to {@link vaultPath}).
- * @param legacy - source path (defaults to {@link legacyVaultPath}).
- * @returns true when a move/copy happened.
- */
-export function migrateLegacyVault(target: string = vaultPath(), legacy: string = legacyVaultPath()): boolean {
-  if (target === legacy) return false
-  if (existsSync(target) || !existsSync(legacy)) return false
-  try {
-    mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
-    try {
-      renameSync(legacy, target)
-    } catch {
-      // Cross-device or locked source: copy the bytes and keep the original.
-      const contents = readFileSync(legacy)
-      writeFileSync(target, contents, { mode: 0o600 })
-    }
-    return true
-  } catch {
-    // Best-effort: an unmigratable legacy file still loads from its old path.
-    return false
-  }
-}
-
 /** AAD for one entry. */
 function entryAad(purpose: VaultPurpose, alias: string): string {
   return `dsh-hardssh:v1:${purpose}:${alias}`
@@ -225,7 +191,6 @@ export class Vault {
       allowEnvUnlock?: boolean
     },
   ) {
-    if (filePath === undefined) migrateLegacyVault()
     this.path = filePath ?? vaultPath()
     this.allowEnvUnlock = options?.allowEnvUnlock === true
     this.load()

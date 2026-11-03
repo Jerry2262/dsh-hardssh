@@ -11,7 +11,6 @@
  * while keeping the build info would make tsc believe the (now missing) output
  * is up to date and skip emitting it.
  *
- * Not published: `files` lists `scripts/export-legacy-workspaces.mjs` only.
  */
 import { rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'

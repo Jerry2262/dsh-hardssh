@@ -47,10 +47,8 @@ describe('LedgerWorkspaceRouter', () => {
     expect(resolution?.connection.workspaceId).toBe('ws-1')
     expect(resolution?.rawKey).toBe('/src/index.ts')
 
-    // Legacy ssh: form resolves through the same codec (compat window).
-    const legacy = router.fromNamespace('ssh:ws-1:/old/path')
-    expect(legacy).toBeDefined()
-    expect(legacy?.connection.workspaceId).toBe('ws-1')
+    // Pre-workspace `ssh:<id>:` keys fail closed (no codec accepts them now).
+    expect(router.fromNamespace('ssh:ws-1:/old/path')).toBeUndefined()
 
     // Unknown workspace fails closed.
     expect(router.fromNamespace('wfs://ghost/x')).toBeUndefined()

@@ -12,9 +12,6 @@
  * - It contains no provider name, so the switch layer never branches on
  *   "which provider" — only on "which workspace".
  *
- * The legacy SSH format (`ssh:<recordId>:`) is still accepted (decode only)
- * so existing persisted targets keep resolving during the migration window.
- *
  * @module @tiphareth/dsh-hardssh/base/namespace
  */
 
@@ -74,29 +71,14 @@ export function decodeWfsKey(input: string): WorkspaceRoute | undefined {
 }
 
 /**
- * Decode a legacy `ssh:<recordId>:<key>` key. Kept during the migration
- * window so persisted remote targets keep resolving; the record id maps to
- * the workspace id 1:1 (old record ids ARE the workspace ids).
- */
-export function decodeLegacySshKey(input: string): WorkspaceRoute | undefined {
-  if (!input.startsWith('ssh:')) return undefined
-  const rest = input.slice('ssh:'.length)
-  const end = rest.indexOf(':')
-  if (end <= 0) return undefined
-  const recordId = rest.slice(0, end)
-  return { workspaceId: recordId, path: rest.slice(end + 1) }
-}
-
-/**
- * The default codec: emits `wfs://…` and accepts both `wfs://…` and legacy
- * `ssh:<id>:…`.
+ * The default codec: emits and accepts only the `wfs://…` form.
  */
 export const defaultNamespaceCodec: WorkspaceNamespaceCodec = {
   encode: encodeRoute,
   decode(input: string): WorkspaceRoute | undefined {
-    return decodeWfsKey(input) ?? decodeLegacySshKey(input)
+    return decodeWfsKey(input)
   },
   isExplicitNamespace(input: string): boolean {
-    return input.startsWith(WFS_SCHEME) || input.startsWith('ssh:')
+    return input.startsWith(WFS_SCHEME)
   },
 }

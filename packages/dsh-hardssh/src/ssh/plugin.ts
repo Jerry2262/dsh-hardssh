@@ -1,6 +1,5 @@
 /**
- * The SSH operations capability, now hosted inside dsh-hardssh (migrated
- * from the legacy dsh-ssh package): host config store
+ * The SSH operations capability, hosted inside dsh-hardssh: host config store
  * (~/.dsh/dsh-ssh.json), the shared ssh2 engine, /api/dsh-ssh routes, the
  * six ssh_* agent tools, the `dsh-ssh` settings namespace, and the SSH
  * system-prompt section.
@@ -59,9 +58,8 @@ export interface SshCapabilityDeps {
   knownHosts?: import('./known-hosts.ts').KnownHostsStore
   /** Credential vault; absent → vault endpoints disabled. */
   vault?: import('./vault.ts').Vault
-  /** SSH-bound workspace record source (host-delete reference guard). The
-   *  legacy ledger in legacy mode, the generic WorkspaceCore-backed projection
-   *  store in the default generic mode. */
+  /** SSH-bound workspace record source (host-delete reference guard): the
+   *  WorkspaceCore-backed projection store. */
   ledger?: import('../backend.ts').WorkspaceStoreView
   /** Compatibility/degradation registry served by `/api/dsh-ssh/health`. */
   health?: import('../runtime/health.ts').HardsshHealthRegistry

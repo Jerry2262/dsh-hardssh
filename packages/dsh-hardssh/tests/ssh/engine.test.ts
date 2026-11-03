@@ -466,7 +466,7 @@ describe('cluster typed failures (B-14)', () => {
     return new SshEngine({ find: () => entry, list: () => [entry] } as never)
   }
 
-  it('keeps the legacy error string and adds the typed interactive failure fields', async () => {
+  it('keeps the human-readable error string and adds the typed interactive failure fields', async () => {
     const failing = clusterEngine()
     const exec = vi.spyOn(failing, 'exec')
     try {

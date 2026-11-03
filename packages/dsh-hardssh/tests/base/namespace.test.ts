@@ -1,13 +1,11 @@
 /**
- * Workspace namespace codec tests: new wfs:// format (encode + decode),
- * legacy ssh:<id>: compatibility decode, and fail-closed behavior for
- * malformed / unknown namespaces.
+ * Workspace namespace codec tests: wfs:// format (encode + decode) and
+ * fail-closed behavior for malformed / unknown namespaces.
  */
 
 import { describe, expect, it } from 'vitest'
 import {
   defaultNamespaceCodec,
-  decodeLegacySshKey,
   decodeWfsKey,
   encodeRoute,
 } from '../../src/base/namespace.ts'
@@ -44,33 +42,19 @@ describe('wfs:// namespace codec', () => {
   })
 })
 
-describe('legacy ssh: namespace compatibility', () => {
-  it('decodes the legacy record-id form', () => {
-    expect(decodeLegacySshKey('ssh:rec-1:/data/root/src')).toEqual({
-      workspaceId: 'rec-1',
-      path: '/data/root/src',
-    })
-  })
-
-  it('returns undefined for malformed legacy keys', () => {
-    expect(decodeLegacySshKey('ssh:')).toBeUndefined()
-    expect(decodeLegacySshKey('ssh::noid')).toBeUndefined()
-    expect(decodeLegacySshKey('sftp:rec:1:/x')).toBeUndefined()
-  })
-})
-
 describe('defaultNamespaceCodec', () => {
-  it('emits wfs:// and accepts both formats', () => {
+  it('emits and decodes only the wfs:// form', () => {
     const codec = defaultNamespaceCodec
     const key = codec.encode({ workspaceId: 'w1', path: '/a' })
     expect(key).toBe('wfs://w1/a')
     expect(codec.decode(key)).toEqual({ workspaceId: 'w1', path: '/a' })
-    expect(codec.decode('ssh:w1:/a')).toEqual({ workspaceId: 'w1', path: '/a' })
+    // Pre-workspace keys are not a namespace this codec knows.
+    expect(codec.decode('ssh:w1:/a')).toBeUndefined()
   })
 
-  it('detects explicit namespaces (both formats) and rejects plain paths', () => {
+  it('detects explicit namespaces and rejects plain paths', () => {
     expect(defaultNamespaceCodec.isExplicitNamespace('wfs://w1/a')).toBe(true)
-    expect(defaultNamespaceCodec.isExplicitNamespace('ssh:w1:/a')).toBe(true)
+    expect(defaultNamespaceCodec.isExplicitNamespace('ssh:w1:/a')).toBe(false)
     expect(defaultNamespaceCodec.isExplicitNamespace('/plain/path')).toBe(false)
     expect(defaultNamespaceCodec.isExplicitNamespace('C:\\plain')).toBe(false)
   })

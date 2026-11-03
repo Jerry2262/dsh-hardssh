@@ -1,6 +1,6 @@
 /**
  * SSH operations browser surfaces, hosted inside dsh-hardssh's client bundle
- * (migrated from the legacy dsh-ssh package): the 'dsh-ssh' locale
+ * (the SSH operations surfaces contributed by dsh-ssh): the 'dsh-ssh' locale
  * dictionaries and the SSH operations console mounted as a RIGHT-Sidebar page
  * tab.
  *

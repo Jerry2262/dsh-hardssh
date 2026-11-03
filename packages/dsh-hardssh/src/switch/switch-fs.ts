@@ -8,9 +8,9 @@
  * ("which SSH workspace owns this cwd?") lives in the deps; a hit routes to
  * that workspace's remote backend, a miss to the local backend. Later
  * operations (stat/read/write) receive only the resolved `FsTarget`, so the
- * backend identity is encoded into the target key — `ssh:<recordId>:<remoteKey>`
- * for remote targets, bare local keys for local ones — and decoded on every
- * dispatch. This keeps two SSH workspaces on DIFFERENT hosts (or different
+ * backend identity is encoded into the target key — `wfs://<workspace-id>/<rawKey>`
+ * for workspace-bound targets, bare local keys for local ones — and decoded on
+ * every dispatch. This keeps two SSH workspaces on DIFFERENT hosts (or different
  * directories on the SAME host) from colliding, and never misroutes a local
  * target.
  *
@@ -33,8 +33,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import { translateAnchorPath } from './anchor-path.ts'
 import { isPathUnder } from '../base/anchor-path.ts'
 
-/** Key namespace: 'ssh:<recordId>:' (legacy) or 'wfs://<id>/' (current)
- *  for remote/workspace-bound targets. Both decode; new keys emit wfs://. */
+/** Pre-workspace target-key prefix. Such keys are refused (fail closed) — a
+ *  stale key must never fall through to the local filesystem. */
 export const REMOTE_PREFIX = 'ssh:'
 /** New URI-style workspace namespace marker. */
 export const WFS_PREFIX = 'wfs://'
@@ -44,7 +44,7 @@ export const WFS_NAMESPACE_MARKER = `${WFS_PREFIX}`
 /** Route one cwd anchor to a backend + namespace. */
 export interface WorkspaceWorld {
   backend: FileSystem
-  /** '' for local; 'wfs://<id>/' or legacy 'ssh:<recordId>:' for one workspace. */
+  /** '' for local; `wfs://<id>/` for one workspace. */
   namespace: string
   /** The local anchor dir of the SSH workspace ('' for local) — used to
    *  translate a model-supplied anchor path into the remote root. */
@@ -130,8 +130,7 @@ export class SwitchFileSystem extends FileSystem {
     return namespace === '' ? rawKey : `${namespace}${rawKey}`
   }
 
-  /** Decode a namespaced key back to (rawKey, world). Supports both the
-   *  current `wfs://<id>/…` form and the legacy `ssh:<recordId>:…` form. */
+  /** Decode a namespaced key back to (rawKey, world): `wfs://<id>/…` only. */
   private decode(key: string): { rawKey: string; world: WorkspaceWorld } | undefined {
     if (key.startsWith(WFS_NAMESPACE_MARKER)) {
       // wfs://<encodedId>/<raw path>
@@ -146,17 +145,9 @@ export class SwitchFileSystem extends FileSystem {
       return undefined
     }
     if (key.startsWith(REMOTE_PREFIX)) {
-      const end = key.indexOf(':', REMOTE_PREFIX.length)
-      if (end > 0) {
-        const namespace = key.slice(0, end + 1)
-        const world = this.deps.worldForNamespace(namespace)
-        if (world !== undefined) return { rawKey: key.slice(namespace.length), world }
-      }
-      // Unknown SSH namespace: the owning workspace was removed (or the key
-      // is stale from before a plugin reload). Fail closed — never fall
-      // through to the local backend with a remote key, which could silently
-      // misroute an operation to the wrong filesystem. Callers treat an
-      // undefined decode as "cannot route this target".
+      // Pre-workspace key namespace. No current world emits it, so it can only
+      // be stale: fail closed — never fall through to the local backend with a
+      // remote key, which could silently misroute an operation.
       return undefined
     }
     // A plain key addresses the LOCAL world, and this is the funnel every
@@ -276,8 +267,8 @@ export class SwitchFileSystem extends FileSystem {
     const p = this.decode(String(parent.targetKey))
     const c = this.decode(String(child.targetKey))
     // Namespace is the stable world identity carried by every target key:
-    // '' = this facade's local world, wfs://<workspace-id>/ (or the legacy
-    // ssh:<workspace-id>:) = one exact workspace. Do NOT compare backend object
+    // '' = this facade's local world, wfs://<workspace-id>/ = one exact
+    // workspace. Do NOT compare backend object
     // identity here. Cordis exposes services through a proxy and two reads of
     // the same backend can be distinct wrapper objects; native WorkspaceFiles
     // then rejected even two byte-identical local targets as "outside". The

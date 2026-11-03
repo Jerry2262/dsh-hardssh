@@ -4,9 +4,8 @@
  * the `WorkspaceCore` consumer interface, and the stable provider API version.
  *
  * Deliberately NOT exported from here: `SshEngine`, concrete SSH connection /
- * provider classes, the ledger/router/registry internals, and migration or
- * legacy compatibility code — so implementation swaps never leak through this
- * boundary (migration plan Phase 6, §「稳定导出」).
+ * provider classes, the ledger/router/registry internals, and version-to-version
+ * conversion code — so implementation swaps never leak through this boundary.
  *
  * @module @tiphareth/dsh-hardssh/workspace
  */

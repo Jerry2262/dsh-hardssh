@@ -1,26 +1,17 @@
 /**
  * SSH-bound workspace path helpers.
  *
- * This module is the last remaining piece of the retired SSH ledger module:
- * the `SshWorkspaceLedger` class was removed with the generic cutover, so what
- * survives here are the anchor/path helpers the generic runtime still shares —
- * the managed SSH anchor layout (`~/.dsh/ssh-workspaces/<id>`), the legacy
- * ledger file location (the one-time import source), the client DTO title
- * default, and the lexical anchor-containment helpers used by fs/subprocess
- * fail-closed gating. Record persistence itself is owned by the generic
- * `WorkspaceLedger` (`./base/ledger.ts`).
+ * Anchor/path helpers the generic runtime shares: the managed SSH anchor
+ * layout (`~/.dsh/ssh-workspaces/<id>`), the client DTO title default, and the
+ * lexical anchor-containment helpers used by fs/subprocess fail-closed gating.
+ * Record persistence itself is owned by the generic `WorkspaceLedger`
+ * (`./base/ledger.ts`).
  *
  * @module dsh-hardssh/ledger
  */
 
 import { join, posix } from 'node:path'
 import { dshHomePath } from './dsh-home.ts'
-
-/** The frozen legacy SSH ledger location: ~/.dsh/dsh-hardssh-workspaces.json.
- *  Only read once by the startup import when no cutover marker exists. */
-export function ledgerPath(): string {
-  return dshHomePath('dsh-hardssh-workspaces.json')
-}
 
 /**
  * Normalize a remote POSIX root: keep '/' as '/', collapse repeated

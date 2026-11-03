@@ -230,11 +230,27 @@ function randomSuffix(): string {
   return Math.random().toString(16).slice(2, 10)
 }
 
+/** Poll an async condition until it holds (or fail after `timeoutMs`). */
+async function waitFor(condition: () => boolean, timeoutMs: number): Promise<void> {
+  const started = Date.now()
+  while (condition() !== true) {
+    if (Date.now() - started > timeoutMs) throw new Error(`condition not met within ${timeoutMs}ms`)
+    await new Promise(resolve => setTimeout(resolve, 10))
+  }
+}
+
 /**
- * Send a raw HTTP/1.1 POST with a DECLARED oversized Content-Length, then
- * read the reply until the server closes the connection. A raw socket is used
- * because the route answers from the header alone and destroys the socket, so
- * a normal client can observe ECONNRESET instead of the response.
+ * Send a raw HTTP/1.1 POST with a DECLARED oversized Content-Length and NO
+ * body, then read the reply until the server closes the connection. A raw
+ * socket is used because the route answers from the header alone and destroys
+ * the socket.
+ *
+ * No body bytes are written on purpose: the route's `Connection: close` +
+ * socket destroy is what stops a sender that would keep streaming, and any
+ * unread body bytes make the kernel answer with a reset that can race ahead of
+ * the 413 response (ECONNRESET in the client). Declaring 1 MiB without sending
+ * it still proves the route rejects from the header alone — waiting for the
+ * body would hang the test instead of returning 413.
  */
 function declaredOversizeRaw(
   targetPort: number,
@@ -250,9 +266,6 @@ function declaredOversizeRaw(
         + 'Content-Type: application/octet-stream\r\n'
         + `Content-Length: ${declaredBytes}\r\n\r\n`,
       )
-      // Start the body but never finish it: the server must reject on the
-      // declared length without reading (and without waiting for) the body.
-      socket.write(Buffer.alloc(64))
     })
     socket.on('data', (chunk: Buffer) => { chunks.push(chunk) })
     socket.on('close', () => resolve({ head: Buffer.concat(chunks).toString('utf8') }))
@@ -475,7 +488,10 @@ describe('upload', () => {
       expect(response.status).toBe(200)
       controller.abort()
       await response.text().catch(() => '')
-      await new Promise(resolve => setTimeout(resolve, 50))
+      // Response close → route abort → engine abort → partial cleanup all run
+      // on the server's async path; poll instead of racing a fixed sleep.
+      await waitFor(() => blocking.uploadSignal?.aborted === true
+        && blocking.removedPaths.length === blocking.uploadedPaths.length, 2000)
       expect(blocking.uploadSignal?.aborted).toBe(true)
       expect(blocking.renamedPaths).toEqual([])
       expect(blocking.removedPaths).toEqual(blocking.uploadedPaths)
@@ -648,7 +664,7 @@ describe('terminal upgrade', () => {
 })
 
 describe('upload size limit (B-13)', () => {
-  it('rejects a DECLARED oversize Content-Length with 413 + connection close, without consuming the body', async () => {
+  it('rejects a DECLARED oversize Content-Length from the header alone (413 + connection close)', async () => {
     const limitedStub = new StubEngine()
     const limited = await startRouteServer({ engine: engine(limitedStub), uploadLimitBytes: 64 })
     try {

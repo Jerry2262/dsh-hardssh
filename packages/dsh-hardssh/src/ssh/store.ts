@@ -572,8 +572,8 @@ export class SecureHostStore {
       if (entry.auth.kind === 'password') return { kind: 'password', password: secret }
       return { kind: 'key', keyPath: entry.auth.keyPath, passphrase: secret !== '' ? secret : undefined }
     }
-    // Plaintext fallback (v1 store / tests) — reachable in none mode only
-    // when an entry still carries inline secrets (legacy v1 file).
+    // Plaintext fallback (tests, hand-edited files): reachable in none mode
+    // only when an entry still carries inline secrets.
     return { kind: entry.auth.kind, keyPath: entry.auth.keyPath, password: entry.auth.password, passphrase: entry.auth.passphrase }
   }
 

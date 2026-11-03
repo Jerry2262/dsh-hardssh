@@ -26,9 +26,6 @@
   },
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
-  "bin": {
-    "dsh-hardssh-export-legacy": "./scripts/export-legacy-workspaces.mjs"
-  },
   "exports": {
     ".": {
       "types": "./lib/types/index.d.ts",
@@ -80,7 +77,6 @@
     "test": "vitest run --exclude tests/ssh/vault.test.ts",
     "test:all": "vitest run",
     "test:vault": "vitest run tests/ssh/vault.test.ts",
-    "workspace:export-legacy": "node ./scripts/export-legacy-workspaces.mjs",
     "prepare": "tsdown"
   },
   "dependencies": {
@@ -165,7 +161,6 @@
     "lib/base/*.js",
     "lib/types/**/*.d.ts",
     "src",
-    "scripts/export-legacy-workspaces.mjs",
     "cordis.patch.yml",
     "README.md",
     "SKILLS.md"

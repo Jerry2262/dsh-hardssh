@@ -2,8 +2,7 @@
  * dsh-hardssh — host half. Owns the local⇄remote mode store, the
  * /api/dsh-hardssh route family (loopback-only), the remote_* agent
  * tools, a model-facing announcement section, the generic workspace core,
- * and — since the legacy dsh-ssh package was merged
- * in — the SSH operations capability (host manager, ssh_* tools, /api/dsh-ssh,
+ * and the SSH operations capability (host manager, ssh_* tools, /api/dsh-ssh,
  * web terminal). In SSH mode the model's ordinary read/write/edit/bash tools
  * run transparently on the remote host through those switch rows. File
  * operations and SSH operations ride ONE shared SshEngine/HostStore over
@@ -20,23 +19,21 @@
  * a remote-bound session, which the workspace-search bridge answers from the
  * bound host instead of searching the local anchor placeholder.
  *
- * The generic WorkspaceCore is the only production workspace runtime. On the
- * first upgraded boot, the frozen legacy SSH ledger is imported once into
- * `~/.dsh/workspaces/index.v1.json`; the atomic migration report is the durable
- * cutover marker. Emergency generic-to-legacy conversion is an offline export,
- * never an alternate in-process routing mode.
+ * The generic WorkspaceCore is the only workspace runtime. Its ledger lives at
+ * `~/.dsh/workspaces/index.v1.json`; boot recovery restores a missing or corrupt
+ * ledger from the `.last-good` snapshot or the newest backup, and otherwise
+ * fails closed instead of silently starting with an empty workspace set.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 import type { HardsshCore } from './core.ts'
-import { ledgerPath, anchorRoot } from './ledger.ts'
+import { anchorRoot } from './ledger.ts'
 import { GenericWorkspaceStore, type WorkspaceStoreView } from './backend.ts'
 import { makeRoutes, reconcileHostWorkspaces, type HostWorkspaceReconcileDeps, type HostWorkspaceReconcileReport } from './routes.ts'
 import { makeWorkspaceTools } from './tools.ts'
@@ -51,7 +48,7 @@ import { withSshConfig } from './ssh/ssh-config.ts'
 import { Vault } from './ssh/vault.ts'
 import { mountWorkspaceCore, genericLedgerPath, type WorkspaceCore } from './runtime/workspace-core.ts'
 import { mountHardsshHealth, watchHardsshOptionalServices } from './runtime/health.ts'
-import { inspectGenericLedger, migrateLegacySshLedger, recoverGenericLedger, type WorkspaceMigrationReport } from './runtime/workspace-migration.ts'
+import { inspectGenericLedger, recoverGenericLedger } from './runtime/workspace-recovery.ts'
 import type { SshWorkspaceRecord } from './protocol.ts'
 
 /** Stable cordis plugin name. */
@@ -168,140 +165,40 @@ export function watchSecretStorageDrift(ctx: Context, running: 'none' | 'vault')
 
 /** Isolated-path options for one generic startup (tests inject temp dirs). */
 export interface GenericBootOptions {
-  /** The frozen legacy SSH ledger file (~/.dsh/dsh-hardssh-workspaces.json). */
-  legacyPath: string
   /** The generic ledger target (~/.dsh/workspaces/index.v1.json). */
   genericPath: string
-  /** Migration report path. The report is also the durable cutover marker. */
-  reportPath?: string
 }
 
 /**
- * Run the Phase-7 cutover sequence against one generic core. A structurally
- * valid atomic migration report is the durable cutover marker: once it exists,
- * the generic ledger is permanently authoritative and startup never compares
- * it with (or even reads) the frozen legacy source again. Without a marker the
- * one-time migration runs and atomically publishes that report only after the
- * generic snapshot has committed and verified.
+ * Boot the one generic workspace runtime: classify the ledger, recover it from
+ * `.last-good` / the newest backup when it is missing or corrupt, then
+ * initialize the core.
  *
- * A valid marker is also a proof of existence: it records that N workspaces
- * were committed, so a MISSING or UNREADABLE ledger underneath it is data loss,
- * not a fresh deployment. `WorkspaceLedger` treats ENOENT as an empty array,
- * which would silently drop every workspace forever (the marker suppresses the
- * one-time import); this gate therefore recovers the ledger — `.last-good`,
- * then the newest `.backup-*`, then a legacy re-import — and, failing that,
- * refuses to start so the surfaces fail closed instead of showing nothing.
+ * A fresh install (no ledger, no recovery source) initializes an empty ledger.
+ * A corrupt ledger with no recovery source rejects: consumers fail closed
+ * instead of silently operating an empty workspace set. Recovery keeps the
+ * current ledger format only; no legacy-format import runs.
  *
- * The recovery is verified against the marker's own id list, so a source that
- * would restore FEWER workspaces than were recorded is rejected instead of
- * accepted as success. A ledger that exists but is corrupt is treated like a
- * missing one; a ledger that exists and is valid is authoritative even when it
- * is empty (deleting every workspace is a legitimate, recorded intent).
- *
- * On any failure the promise rejects and the core stays NOT ready, so workspace
- * consumers fail closed instead of silently operating local files.
+ * @param core - the generic core to initialize.
+ * @param options - the ledger path (tests inject temp dirs).
  */
 export async function bootstrapGenericWorkspaceCore(core: WorkspaceCore, options: GenericBootOptions): Promise<void> {
-  const reportPath = options.reportPath ?? join(options.genericPath, '..', 'migration-report.json')
-  const marker = readGenericCutoverMarker(reportPath)
-  if (marker === undefined) {
-    await migrateLegacySshLedger({
-      mode: 'generic',
-      legacyPath: options.legacyPath,
-      genericPath: options.genericPath,
-      reportPath,
-    })
-  } else if (marker.recordCount > 0) {
-    const state = await inspectGenericLedger(options.genericPath)
-    if (state !== 'readable') {
-      const recovery = await recoverGenericLedger({
-        genericPath: options.genericPath,
-        legacyPath: options.legacyPath,
-        expectedIds: marker.ids,
-      })
-      if (!recovery.recovered) {
-        throw new Error(
-          `generic workspace ledger '${options.genericPath}' is ${state} although the cutover marker '${reportPath}' reports ${marker.recordCount} workspace(s) `
-          + `(recovery failed: ${recovery.reason ?? 'unknown reason'}); refusing to start with a reduced workspace set `
-          + '— restore the ledger from a backup, or delete the marker to re-run the one-time import',
-        )
-      }
-      // Leave durable, user-inspectable evidence: a console line alone is easy
-      // to miss, and this is the only signal that workspaces came back from a
-      // recovery source rather than normal startup.
-      writeRecoveryReport(options.genericPath, marker, recovery)
+  const state = await inspectGenericLedger(options.genericPath)
+  if (state !== 'readable') {
+    const recovery = await recoverGenericLedger({ genericPath: options.genericPath })
+    if (recovery.recovered) {
+      console.warn(
+        `[dsh-hardssh] generic workspace ledger was ${state}; restored ${recovery.recordCount ?? 0} workspace(s) `
+        + `from ${recovery.source} '${recovery.path}'`,
+      )
+    } else if (state === 'corrupt') {
+      throw new Error(
+        `generic workspace ledger '${options.genericPath}' is corrupt (recovery failed: ${recovery.reason ?? 'unknown reason'}); `
+        + 'refusing to start with an empty workspace set — restore it from a backup',
+      )
     }
   }
   await core.initialize()
-}
-
-/** Best-effort sidecar record of one automatic ledger recovery. */
-function writeRecoveryReport(
-  genericPath: string,
-  marker: WorkspaceMigrationReport,
-  recovery: { source?: string; path?: string; recordCount?: number },
-): void {
-  try {
-    const target = join(genericPath, '..', 'recovery-report.json')
-    writeFileSync(target, `${JSON.stringify({
-      schemaVersion: 1,
-      recoveredAt: new Date().toISOString(),
-      ledger: genericPath,
-      source: recovery.source,
-      sourcePath: recovery.path,
-      restoredRecordCount: recovery.recordCount,
-      markerRecordCount: marker.recordCount,
-      markerIds: marker.ids,
-    }, null, 2)}\n`, 'utf8')
-  } catch (error) {
-    console.warn(`[dsh-hardssh] workspace ledger was restored but the recovery report could not be written: ${error instanceof Error ? error.message : String(error)}`)
-  }
-}
-
-/**
- * Validate only the persisted report schema, never current ledger/source
- * content. The marker records that the migration committed and verified; its
- * presence is what makes later generic CRUD (including rename and deleting the
- * last SSH record) authoritative across restarts.
- *
- * The parsed marker is returned (not just a boolean) because its `recordCount`
- * is what distinguishes "the ledger is legitimately empty" from "the ledger
- * file went missing" at boot.
- *
- * @param path - the migration report path.
- * @returns the validated marker, or undefined when absent/malformed.
- */
-function readGenericCutoverMarker(path: string): WorkspaceMigrationReport | undefined {
-  if (!existsSync(path)) return undefined
-  let value: unknown
-  try {
-    value = JSON.parse(readFileSync(path, 'utf8')) as unknown
-  } catch {
-    return undefined
-  }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
-  const marker = value as Record<string, unknown>
-  if (marker.schemaVersion !== 1 || marker.mode !== 'generic') return undefined
-  if (marker.status !== 'migrated' && marker.status !== 'unchanged') return undefined
-  if (typeof marker.createdAt !== 'string' || Number.isNaN(Date.parse(marker.createdAt))) return undefined
-  if (typeof marker.sourceDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(marker.sourceDigest)) return undefined
-  if (typeof marker.targetDigest !== 'string' || !/^[0-9a-f]{64}$/u.test(marker.targetDigest)) return undefined
-  if (typeof marker.recordCount !== 'number' || !Number.isSafeInteger(marker.recordCount) || marker.recordCount < 0) return undefined
-  if (!Array.isArray(marker.ids) || marker.ids.length !== marker.recordCount || marker.ids.some(id => typeof id !== 'string' || id === '')) return undefined
-  if (new Set(marker.ids).size !== marker.ids.length) return undefined
-  if (!Array.isArray(marker.differences) || marker.differences.some(difference => typeof difference !== 'string') || marker.differences.length !== 0) return undefined
-  if (marker.backupPath !== undefined && typeof marker.backupPath !== 'string') return undefined
-  return value as WorkspaceMigrationReport
-}
-
-/**
- * Migration report path next to the generic ledger (~/.dsh/workspaces/
- * migration-report.json). The migration module cannot know the deployment
- * directory (only the caller passes it through GenericBootOptions), so the
- * production assembly computes the path here once.
- */
-function genericMigrationReportPath(): string {
-  return join(genericLedgerPath(), '..', 'migration-report.json')
 }
 
 /** Order of the announcement section (right after the dsh-ssh section at 150). */
@@ -492,12 +389,7 @@ export function apply(ctx: Context, config?: Config): void {
   // ledger/router used by fs, subprocess, routes, tools and host-delete guards.
   const genericCore = mountWorkspaceCore(ctx, { engine, hosts })
   health.set('workspaceCore', { state: 'degraded', reason: 'workspace core is still initializing' })
-  const boot = bootstrapGenericWorkspaceCore(genericCore, {
-    legacyPath: ledgerPath(),
-    genericPath: genericLedgerPath(),
-    // The atomically published report is also the permanent cutover marker.
-    reportPath: genericMigrationReportPath(),
-  })
+  const boot = bootstrapGenericWorkspaceCore(genericCore, { genericPath: genericLedgerPath() })
   void boot.then(() => {
     health.set('workspaceCore', { state: 'ready' })
   }).catch((error: unknown) => {

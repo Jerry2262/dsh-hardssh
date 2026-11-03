@@ -8,7 +8,7 @@ import { SwitchSubprocessRuntime } from '../src/switch/switch-subprocess.ts'
 
 /** A remote world bound to the anchor /workspace/a and root /remote/r. */
 function remoteWorld(backend: FileSystem, anchor = '/workspace/a', root = '/remote/r'): { world: WorkspaceWorld; namespace: string } {
-  const namespace = 'ssh:ws-1:'
+  const namespace = 'wfs://ws-1/'
   return { world: { backend, namespace, anchorPath: anchor, remoteRoot: root }, namespace }
 }
 
@@ -32,7 +32,7 @@ describe('SwitchFileSystem cwd routing', () => {
     // SSH anchor cwd -> remote; the target key is namespaced.
     const remoteTarget = await facade.resolve('x', { cwd: '/workspace/a' })
     expect(remoteResolve).toHaveBeenCalledTimes(1)
-    expect(String(remoteTarget.targetKey)).toBe('ssh:ws-1:remote-key')
+    expect(String(remoteTarget.targetKey)).toBe('wfs://ws-1/remote-key')
   })
 
   it('advertises the local backend sandbox mode so write/edit keep their escalation entry', () => {
@@ -67,7 +67,7 @@ describe('SwitchFileSystem cwd routing', () => {
     expect(localWrite).toHaveBeenCalledTimes(1)
     expect(localWrite.mock.calls[0][4]).toBe(policy)
 
-    await facade.writeText(target('ssh:ws-1:remote-key', '/remote/r/x'), 'x', undefined, undefined, policy)
+    await facade.writeText(target('wfs://ws-1/remote-key', '/remote/r/x'), 'x', undefined, undefined, policy)
     expect(remoteWrite).toHaveBeenCalledTimes(1)
     // The 5th argument is the local-only policy: remote worlds must not receive it.
     expect(remoteWrite.mock.calls[0][4]).toBeUndefined()
@@ -174,7 +174,7 @@ describe('SwitchFileSystem cwd routing', () => {
     const target = await facade.resolve(`${anchor}/src/app.ts`)
     expect(remoteResolve).toHaveBeenCalledWith('/data/app/src/app.ts', undefined)
     expect(localResolve).not.toHaveBeenCalled()
-    expect(String(target.targetKey)).toBe('ssh:ws-1:remote:/data/app/src/app.ts')
+    expect(String(target.targetKey)).toBe('wfs://ws-1/remote:/data/app/src/app.ts')
 
     // A client-infrastructure path outside the anchors window stays local.
     await facade.resolve('/Users/me/.dsh/skills/foo/SKILL.md')
@@ -200,7 +200,7 @@ describe('SwitchFileSystem cwd routing', () => {
     const sibling = { resolve: siblingResolve } as unknown as SshFileSystem
     const siblingWorld: WorkspaceWorld = {
       backend: sibling,
-      namespace: 'ssh:ws-2:',
+      namespace: 'wfs://ws-2/',
       anchorPath: '/Users/me/.dsh/ssh-workspaces/ws-2',
       remoteRoot: '/srv/other',
     }
@@ -217,7 +217,7 @@ describe('SwitchFileSystem cwd routing', () => {
     const target = await facade.resolve('/Users/me/.dsh/ssh-workspaces/ws-2/notes.md')
     expect(siblingResolve).toHaveBeenCalledWith('/srv/other/notes.md', undefined)
     expect(localResolve).not.toHaveBeenCalled()
-    expect(String(target.targetKey)).toBe('ssh:ws-2:sibling:/srv/other/notes.md')
+    expect(String(target.targetKey)).toBe('wfs://ws-2/sibling:/srv/other/notes.md')
   })
 
   it('applies the same anchor-first rule to lstat and Windows path syntax (D-01)', async () => {
@@ -271,13 +271,13 @@ describe('SwitchFileSystem cwd routing', () => {
     // Everything else routes REMOTE (the default): workspace tree, relative
     // paths, other server dirs, system files.
     const underRoot = await facade.resolve('/remote/r/sub', remoteCwd)
-    expect(String(underRoot.targetKey)).toBe('ssh:ws-1:remote:/remote/r/sub')
+    expect(String(underRoot.targetKey)).toBe('wfs://ws-1/remote:/remote/r/sub')
     const underAnchor = await facade.resolve('/workspace/a/x.txt', remoteCwd)
-    expect(String(underAnchor.targetKey)).toBe('ssh:ws-1:remote:/remote/r/x.txt') // anchor→remoteRoot translation
+    expect(String(underAnchor.targetKey)).toBe('wfs://ws-1/remote:/remote/r/x.txt') // anchor→remoteRoot translation
     await facade.resolve('src/util.ts', remoteCwd)
     await facade.resolve('/data/other/y', remoteCwd)
     const system = await facade.resolve('/etc/passwd', remoteCwd)
-    expect(String(system.targetKey)).toBe('ssh:ws-1:remote:/etc/passwd')
+    expect(String(system.targetKey)).toBe('wfs://ws-1/remote:/etc/passwd')
 
     expect(localResolve).toHaveBeenCalledTimes(3)
     expect(remoteResolve).toHaveBeenCalledTimes(5)
@@ -308,9 +308,9 @@ describe('SwitchFileSystem cwd routing', () => {
     })
 
     const anchored = await facade.resolve(`${anchor}/package.json`, { cwd: anchor })
-    expect(String(anchored.targetKey)).toBe('ssh:ws-1:remote:/srv/ws-1/package.json')
+    expect(String(anchored.targetKey)).toBe('wfs://ws-1/remote:/srv/ws-1/package.json')
     const anchorItself = await facade.resolve(anchor, { cwd: anchor })
-    expect(String(anchorItself.targetKey)).toBe('ssh:ws-1:remote:/srv/ws-1')
+    expect(String(anchorItself.targetKey)).toBe('wfs://ws-1/remote:/srv/ws-1')
     // Client infrastructure OUTSIDE any workspace anchor still stays local.
     const skills = await facade.resolve('/Users/me/.dsh/skills/x.md', { cwd: anchor })
     expect(String(skills.targetKey)).toBe('local:/Users/me/.dsh/skills/x.md')
@@ -347,7 +347,7 @@ describe('SwitchFileSystem cwd routing', () => {
     })
 
     const sibling = await facade.resolve(`${anchorB}/src/main.ts`, { cwd: anchorA })
-    expect(String(sibling.targetKey)).toBe('ssh:ws-1:remote-b:/srv/b/src/main.ts')
+    expect(String(sibling.targetKey)).toBe('wfs://ws-1/remote-b:/srv/b/src/main.ts')
     expect(localResolve).not.toHaveBeenCalled()
   })
 })

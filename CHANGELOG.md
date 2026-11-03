@@ -12,6 +12,20 @@
 - 保留既有的本地路径校验：内核 flow 交回的路径仍先经过根目录/相对路径检查再交给宿主，避免创建无法打开会话的工作区。
 - 测试：SSH 分支的请求时序与禁用状态；本地分支渲染内核 occupant 及其 injected 面、路径透传、根目录拒绝、取消透传、内核 occupant 缺失时的错误提示。
 
+### 清理：删除其余旧版本兼容代码
+
+- 删除旧 SSH 账本导入整条链路：`runtime/workspace-migration.ts`（legacy→generic 迁移、cutover marker、shadow 对比）、`ledgerPath()`、启动时的一次性迁移与基于 marker 的恢复、`migration-report.json` / `recovery-report.json`。启动现在只有一条路径：检查账本 → 从 `.last-good` 或最新备份恢复 → 初始化；账本损坏且无可恢复源时 fail closed。`GenericBootOptions` 只剩 `genericPath`。
+- 删除 vault 旧位置迁移（`legacyVaultPath` / `migrateLegacyVault`），fs seam 不再把旧 vault 路径额外加入 deny 列表。
+- 删除旧工作区目标命名空间 `ssh:<id>:` 的解码；这类 key 现在直接 fail closed（不会落到本地文件系统），只接受 `wfs://`。
+- 删除 `scripts/export-legacy-workspaces.mjs`、bin `dsh-hardssh-export-legacy`、`workspace:export-legacy` script、`files` 条目与对应测试。
+- 相关注释与测试名同步去掉了“legacy”说法；保留的行为只有两类：`hosts.json` 里手写内联密码的读取回退（不是版本兼容，是人工编辑文件），以及 `ssh_cluster` 结果里人类可读的 `error` 字段。
+
+### 测试：修复两个 upload 用例的竞态（全量偶发失败的来源）
+
+- B-13 declared-oversize：原用例声明 1 MiB 后先写 64 B body 再等 413；服务端按策略回 413 后销毁 socket，未读 body 会让内核用 RST 收尾，客户端可能在收到响应前就报 `ECONNRESET`。改为只发送请求头（声明 1 MiB、不发 body）：同样证明“按声明长度拒绝、不等待也不消费 body”，且结果确定。
+- upload abort cleanup：原用例 abort 响应后固定 `sleep(50)` 就断言远端 abort 与 partial 清理；并行负载高时服务端异步链来不及执行。改为轮询直到条件成立（上限 2s）。
+- 结果：全量 744/744 通过；`tests/ssh/routes.test.ts` 连跑 3 次均为 27/27。
+
 ### 清理：移除旧版客户端 localStorage 迁移
 
 - 删除 `client/migrate.ts`：它把更早版本插件按 session 记在 localStorage（`ssh-session-state:<id>`）的全局 local⇄remote 模式转成 SSH 工作区记录。当前版本已完全按工作区绑定，本项目自用、不做老版本兼容，这段迁移只会在启动时多扫一遍 localStorage。

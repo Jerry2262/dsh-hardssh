@@ -70,18 +70,16 @@ function send(method: string, path: string, body?: unknown): Promise<HttpRespons
 const get = (path: string): Promise<HttpResponse> => send('GET', path)
 
 beforeAll(async () => {
-  // Generic runtime (fake engine only): boot the one-time migration (empty
-  // legacy source) + initialize, then wrap the core in the projection store.
-  const legacyPath = join(dir, 'legacy.json')
+  // Generic runtime (fake engine only): initialize the ledger, then wrap the
+  // core in the projection store.
   const genericPath = join(dir, 'index.json')
   const anchorBase = join(dir, 'ssh-workspaces')
   mkdirSync(anchorBase, { recursive: true })
-  writeFileSync(legacyPath, '[]', 'utf8')
   const ctx = new Context()
   const providers = new WorkspaceProviderRegistry()
   providers.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), ctx))
   const core = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath, join(dir, 'anchors')), providers)
-  const boot = bootstrapGenericWorkspaceCore(core, { legacyPath, genericPath })
+  const boot = bootstrapGenericWorkspaceCore(core, { genericPath })
   void boot.catch(() => { /* surfaced through the store gate */ })
   store = new GenericWorkspaceStore(core, boot, anchorBase)
 
@@ -140,7 +138,7 @@ describe('generic workspace CRUD over the /api/dsh-hardssh surface', () => {
     expect(workspace.alias).toBe('host')
     expect(workspace.remoteRoot).toBe('/srv/app')
     expect(workspace.createdAt).toEqual(expect.any(String))
-    // The anchor keeps the legacy layout under the SSH anchor base (ids and
+    // The anchor keeps the established layout under the SSH anchor base (ids and
     // anchors must stay stable for sidebar/session binding).
     expect(String(workspace.anchorPath)).toMatch(/ssh-workspaces/)
 
@@ -344,16 +342,14 @@ describe('remote mkdir route (workspace picker "New folder")', () => {
 /** A fresh generic projection store (own files) for one test. */
 async function freshGenericStore(): Promise<GenericWorkspaceStore> {
   const root = mkdtempSync(join(tmpdir(), 'dsh-hardssh-a04-'))
-  const legacyPath = join(root, 'legacy.json')
   const genericPath = join(root, 'index.json')
   const anchorBase = join(root, 'ssh-workspaces')
   mkdirSync(anchorBase, { recursive: true })
-  writeFileSync(legacyPath, '[]', 'utf8')
   const ctx = new Context()
   const providers = new WorkspaceProviderRegistry()
   providers.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), ctx))
   const core = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath, join(root, 'anchors')), providers)
-  const boot = bootstrapGenericWorkspaceCore(core, { legacyPath, genericPath })
+  const boot = bootstrapGenericWorkspaceCore(core, { genericPath })
   await boot
   return new GenericWorkspaceStore(core, boot, anchorBase)
 }

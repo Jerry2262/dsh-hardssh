@@ -1105,7 +1105,7 @@ export class ConnectionManager {
    *
    * Per-host failures carry the typed, secret-free fields declared on
    * `ClusterResult` (`code`, and `secret` / `hostKeyFingerprint` / `expected` /
-   * `actual` where applicable) alongside the legacy `error` string, so
+   * `actual` where applicable) alongside the human-readable `error` string, so
    * automation can branch on a stable code and the GUI can open the right
    * credential/fingerprint dialog without parsing a localized message.
    */
@@ -1177,8 +1177,8 @@ export class ConnectionManager {
   }
 
   /**
-   * Classify one per-host cluster failure. Keeps the legacy `error` string for
-   * backward compatibility while adding the typed reason: a NeedsPassword /
+   * Classify one per-host cluster failure: the human-readable `error` string
+   * stays available while the typed reason is added: a NeedsPassword /
    * host-key failure is interactive in the GUI, and automation needs a stable
    * code. The message is redacted because connect/resolve errors can embed a
    * credential; the added fields are fingerprints and enum values only.

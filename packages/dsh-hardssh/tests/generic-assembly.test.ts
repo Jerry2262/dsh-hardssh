@@ -20,7 +20,6 @@ import { WorkspaceLedger } from '../src/base/ledger.ts'
 import { WorkspaceProviderRegistry } from '../src/base/registry.ts'
 import { DefaultWorkspaceCore, type WorkspaceCore } from '../src/runtime/workspace-core.ts'
 import type { WorkspaceRecord } from '../src/base/model.ts'
-import { legacySshRecordToWorkspaceRecord } from '../src/runtime/workspace-migration.ts'
 import { createSshWorkspaceProvider } from '../src/providers/ssh/provider.ts'
 import { createLocalWorkspaceProvider, RootedLocalFileSystem, RootedLocalSubprocessRuntime } from '../src/providers/local/provider.ts'
 import { WFS_NAMESPACE_MARKER, SwitchFileSystem } from '../src/switch/switch-fs.ts'
@@ -32,144 +31,85 @@ import { bootstrapGenericWorkspaceCore } from '../src/index.ts'
 import { FakeEngine, asSshEngine } from './providers/fake-ssh-engine.ts'
 import type { SshWorkspaceRecord } from '../src/protocol.ts'
 
-describe('generic startup (migration + initialize)', () => {
-  it('writes a migration report next to the ledger when reportPath is supplied (Phase 7 step 6)', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'generic-boot-report-'))
-    const legacyPath = join(dir, 'legacy.json')
-    const genericPath = join(dir, 'index.json')
-    const reportPath = join(dir, 'migration-report.json')
-    const anchor = join(dir, 'ssh-anchor')
-    mkdirSync(anchor, { recursive: true })
-    writeFileSync(legacyPath, JSON.stringify([{
-      id: 'reported', title: 'proj', alias: 'host', remoteRoot: '/srv/app', anchorPath: anchor, createdAt: '2025-01-01T00:00:00.000Z',
-    } satisfies SshWorkspaceRecord]), 'utf8')
+/** Project one SSH workspace fixture into a generic ledger record (what a
+ *  cutover-era record looks like on disk). */
+function toWorkspaceRecord(record: SshWorkspaceRecord): WorkspaceRecord {
+  return {
+    schemaVersion: 1,
+    id: record.id,
+    title: record.title,
+    provider: { id: 'ssh', connectionRef: { id: record.alias, alias: record.alias } },
+    location: { kind: 'posix', root: record.remoteRoot },
+    anchor: { path: record.anchorPath, mode: 'managed' },
+    createdAt: record.createdAt,
+    updatedAt: record.createdAt,
+  }
+}
 
-    const providers = new WorkspaceProviderRegistry()
-    providers.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), new Context()))
-    const core = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath), providers)
-    await bootstrapGenericWorkspaceCore(core, { legacyPath, genericPath, reportPath })
+function makeCore(genericPath: string, sshAnchorRoot: string): DefaultWorkspaceCore {
+  const providers = new WorkspaceProviderRegistry()
+  providers.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), new Context()))
+  return new DefaultWorkspaceCore(new WorkspaceLedger(genericPath, sshAnchorRoot), providers)
+}
+
+describe('generic startup (ledger recovery + initialize)', () => {
+  it('initializes a fresh ledger and keeps records across a restart', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'generic-boot-fresh-'))
+    const genericPath = join(dir, 'index.json')
+    const anchorRoot = join(dir, 'ssh-anchors')
+    mkdirSync(anchorRoot, { recursive: true })
+
+    const core = makeCore(genericPath, anchorRoot)
+    await bootstrapGenericWorkspaceCore(core, { genericPath })
     expect(core.isReady()).toBe(true)
-
-    // The first boot migrates and persists a report with digests + record ids.
-    const report = JSON.parse(readFileSync(reportPath, 'utf8')) as { status: string; recordCount: number; ids: string[]; sourceDigest: string }
-    expect(report.status).toBe('migrated')
-    expect(report.recordCount).toBe(1)
-    expect(report.ids).toEqual(['reported'])
-    expect(report.sourceDigest.length).toBeGreaterThan(0)
-    await core.closeAll()
-  })
-
-  it('migrates once, is idempotent on a second boot, and preserves ids/anchors', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'generic-boot-'))
-    const legacyPath = join(dir, 'legacy.json')
-    const genericPath = join(dir, 'index.json')
-    const anchor = join(dir, 'ssh-anchor')
-    mkdirSync(anchor, { recursive: true })
-    const source: SshWorkspaceRecord = {
-      id: 'keep-me', title: 'proj', alias: 'host', remoteRoot: '/srv/app', anchorPath: anchor, createdAt: '2025-01-01T00:00:00.000Z',
-    }
-    writeFileSync(legacyPath, JSON.stringify([source]), 'utf8')
-
-    const providers = new WorkspaceProviderRegistry()
-    providers.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), new Context()))
-    const core = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath), providers)
-    await bootstrapGenericWorkspaceCore(core, { legacyPath, genericPath })
-    expect(core.isReady()).toBe(true)
-    const records = await core.list()
-    expect(records.map(record => record.id)).toEqual(['keep-me'])
-    expect(records[0]!.anchor?.path).toBe(anchor)
-
-    const core2 = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath), new WorkspaceProviderRegistry())
-    await bootstrapGenericWorkspaceCore(core2, { legacyPath, genericPath })
-    expect(core2.isReady()).toBe(true)
-    expect(await core2.list()).toHaveLength(1)
-    await core.closeAll()
-    await core2.closeAll()
-  })
-
-  it('uses the migration report as a permanent cutover marker across generic CRUD and frozen-source drift', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'generic-boot-postcutover-'))
-    const legacyPath = join(dir, 'legacy.json')
-    const genericPath = join(dir, 'index.json')
-    const reportPath = join(dir, 'migration-report.json')
-    const anchor = join(dir, 'ssh-anchor')
-    mkdirSync(anchor, { recursive: true })
-    const source: SshWorkspaceRecord = {
-      id: 'old-1', title: 'proj', alias: 'host', remoteRoot: '/srv/app', anchorPath: anchor, createdAt: '2025-01-01T00:00:00.000Z',
-    }
-    writeFileSync(legacyPath, JSON.stringify([source]), 'utf8')
-
-    // First boot migrates and atomically publishes the durable marker.
-    const providers = new WorkspaceProviderRegistry()
-    providers.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), new Context()))
-    const core = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath), providers)
-    await bootstrapGenericWorkspaceCore(core, { legacyPath, genericPath, reportPath })
-    expect((JSON.parse(readFileSync(reportPath, 'utf8')) as { mode: string }).mode).toBe('generic')
-
-    // Normal post-cutover CRUD must never be compared back to the frozen source.
-    await core.update('old-1', { title: 'renamed only in generic' })
     await core.create({
       schemaVersion: 1,
-      id: 'new-1',
-      title: 'new',
+      id: 'kept',
+      title: 'proj',
       provider: { id: 'ssh', connectionRef: { id: 'host', alias: 'host' } },
-      location: { kind: 'posix', root: '/srv/new' },
-      anchor: { path: join(dir, 'ssh-anchor-new'), mode: 'managed' },
+      location: { kind: 'posix', root: '/srv/app' },
+      anchor: { path: join(anchorRoot, 'kept'), mode: 'managed' },
     })
     await core.closeAll()
 
-    // Even an unreadable changed legacy source is irrelevant after cutover:
-    // the valid marker makes the boot skip the import entirely, so the
-    // malformed source can neither abort startup nor be merged back in.
-    writeFileSync(legacyPath, '{legacy changed and is now invalid', 'utf8')
-    const providers2 = new WorkspaceProviderRegistry()
-    providers2.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), new Context()))
-    const core2 = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath), providers2)
-    // No rejection: a rejected boot here would mean the frozen source was read.
-    await expect(bootstrapGenericWorkspaceCore(core2, { legacyPath, genericPath, reportPath })).resolves.toBeUndefined()
-    expect(core2.isReady()).toBe(true)
-    expect((await core2.get('old-1'))?.title).toBe('renamed only in generic')
-    expect((await core2.list()).map(record => record.id).sort()).toEqual(['new-1', 'old-1'])
-
-    // Deleting the final generic SSH record stays deleted on every later boot;
-    // the frozen source cannot resurrect it merely because the ledger is empty.
-    await core2.remove('old-1')
-    await core2.remove('new-1')
-    await core2.closeAll()
-    const core3 = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath), new WorkspaceProviderRegistry())
-    await bootstrapGenericWorkspaceCore(core3, { legacyPath, genericPath, reportPath })
-    expect(core3.isReady()).toBe(true)
-    expect(await core3.list()).toEqual([])
-    await core3.closeAll()
+    const restarted = makeCore(genericPath, anchorRoot)
+    await bootstrapGenericWorkspaceCore(restarted, { genericPath })
+    expect(restarted.isReady()).toBe(true)
+    expect((await restarted.list()).map(record => record.id)).toEqual(['kept'])
+    await restarted.closeAll()
   })
 
-  it('aborts a same-id conflict without touching the generic target', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'generic-boot-conflict-'))
-    const legacyPath = join(dir, 'legacy.json')
+  it('restores a corrupt ledger from the .last-good snapshot', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'generic-boot-recover-'))
     const genericPath = join(dir, 'index.json')
-    const anchor = join(dir, 'ssh-anchor')
-    mkdirSync(anchor, { recursive: true })
-    const source: SshWorkspaceRecord = {
-      id: 'same', title: 'proj', alias: 'host', remoteRoot: '/srv/app', anchorPath: anchor, createdAt: '2025-01-01T00:00:00.000Z',
-    }
-    writeFileSync(legacyPath, JSON.stringify([source]), 'utf8')
-    const conflicting = { ...legacySshRecordToWorkspaceRecord(source), title: 'different' }
-    writeFileSync(genericPath, JSON.stringify([conflicting]), 'utf8')
-    const before = readFileSync(genericPath, 'utf8')
+    const anchorRoot = join(dir, 'ssh-anchors')
+    mkdirSync(anchorRoot, { recursive: true })
 
-    const providers = new WorkspaceProviderRegistry()
-    providers.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), new Context()))
-    const core = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath), providers)
-    await expect(bootstrapGenericWorkspaceCore(core, { legacyPath, genericPath })).rejects.toThrow("conflict for id 'same'")
-    // Never guesses an overwrite; the file and readiness stay untouched.
-    expect(readFileSync(genericPath, 'utf8')).toBe(before)
-    expect(core.isReady()).toBe(false)
+    const first = makeCore(genericPath, anchorRoot)
+    await bootstrapGenericWorkspaceCore(first, { genericPath })
+    await first.create({
+      schemaVersion: 1,
+      id: 'recovered',
+      title: 'proj',
+      provider: { id: 'ssh', connectionRef: { id: 'host', alias: 'host' } },
+      location: { kind: 'posix', root: '/srv/app' },
+      anchor: { path: join(anchorRoot, 'recovered'), mode: 'managed' },
+    })
+    await first.closeAll()
+    // Every ledger save also writes the rolling `.last-good` snapshot.
+    expect(existsSync(`${genericPath}.last-good`)).toBe(true)
+    writeFileSync(genericPath, '{broken', 'utf8')
+
+    const restarted = makeCore(genericPath, anchorRoot)
+    await bootstrapGenericWorkspaceCore(restarted, { genericPath })
+    expect(restarted.isReady()).toBe(true)
+    expect((await restarted.list()).map(record => record.id)).toEqual(['recovered'])
+    await restarted.closeAll()
   })
 
-  it('fails closed on a corrupt generic ledger: boot rejects and the store/fs seam refuse instead of falling back local', async () => {    const dir = mkdtempSync(join(tmpdir(), 'generic-boot-corrupt-'))
-    const legacyPath = join(dir, 'legacy.json')
+  it('fails closed on a corrupt ledger with no recovery source: boot rejects and the store/fs seam refuse', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'generic-boot-corrupt-'))
     const genericPath = join(dir, 'index.json')
-    writeFileSync(legacyPath, '[]', 'utf8')
     writeFileSync(genericPath, '{broken', 'utf8')
     const before = readFileSync(genericPath, 'utf8')
     const sshAnchorRoot = join(dir, 'ssh-anchors')
@@ -179,14 +119,11 @@ describe('generic startup (migration + initialize)', () => {
     const anchor = join(sshAnchorRoot, 'ws-1')
     mkdirSync(anchor, { recursive: true })
 
-    const ctx = new Context()
-    const providers = new WorkspaceProviderRegistry()
-    providers.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), ctx))
-    const core = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath, sshAnchorRoot), providers)
-    const boot = bootstrapGenericWorkspaceCore(core, { legacyPath, genericPath })
+    const core = makeCore(genericPath, sshAnchorRoot)
+    const boot = bootstrapGenericWorkspaceCore(core, { genericPath })
     await expect(boot).rejects.toThrow()
     expect(core.isReady()).toBe(false)
-    // The corrupt file is never overwritten by a silent "empty" conversion.
+    // The corrupt file is never overwritten with an empty ledger.
     expect(readFileSync(genericPath, 'utf8')).toBe(before)
 
     // The workspace store (routes/tools) fails closed through its gate.
@@ -197,6 +134,51 @@ describe('generic startup (migration + initialize)', () => {
     // the core is unready — a silent local fallback here would operate a bound
     // remote workspace's files on the host.
     expect(() => genericFsWorldFor(core, anchor, [sshAnchorRoot])).toThrow(/not ready/)
+  })
+})
+
+describe('generic boot recovery (current ledger format)', () => {
+  it('recovers from the newest .backup- snapshot when the ledger and .last-good are both gone', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'generic-boot-backup-'))
+    const genericPath = join(dir, 'index.json')
+    const anchorRoot = join(dir, 'ssh-anchors')
+    mkdirSync(anchorRoot, { recursive: true })
+
+    const first = makeCore(genericPath, anchorRoot)
+    await bootstrapGenericWorkspaceCore(first, { genericPath })
+    await first.create({
+      schemaVersion: 1,
+      id: 'from-backup',
+      title: 'proj',
+      provider: { id: 'ssh', connectionRef: { id: 'host', alias: 'host' } },
+      location: { kind: 'posix', root: '/srv/app' },
+      anchor: { path: join(anchorRoot, 'from-backup'), mode: 'managed' },
+    })
+    await first.closeAll()
+    const ledger = readFileSync(genericPath, 'utf8')
+    rmSync(genericPath)
+    rmSync(`${genericPath}.last-good`, { force: true })
+    writeFileSync(`${genericPath}.backup-2026-01-01T00-00-00-000Z`, ledger, 'utf8')
+
+    const restarted = makeCore(genericPath, anchorRoot)
+    await bootstrapGenericWorkspaceCore(restarted, { genericPath })
+    expect(restarted.isReady()).toBe(true)
+    expect((await restarted.list()).map(record => record.id)).toEqual(['from-backup'])
+    await restarted.closeAll()
+  })
+
+  it('keeps an existing but EMPTY ledger authoritative (deleting every workspace is a real intent)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'generic-boot-empty-'))
+    const genericPath = join(dir, 'index.json')
+    const anchorRoot = join(dir, 'ssh-anchors')
+    mkdirSync(anchorRoot, { recursive: true })
+    writeFileSync(genericPath, '[]', 'utf8')
+
+    const core = makeCore(genericPath, anchorRoot)
+    await expect(bootstrapGenericWorkspaceCore(core, { genericPath })).resolves.toBeUndefined()
+    expect(core.isReady()).toBe(true)
+    expect(await core.list()).toEqual([])
+    await core.closeAll()
   })
 })
 
@@ -234,7 +216,7 @@ async function makeGenericCore(dir: string, record: SshWorkspaceRecord): Promise
   ctx: Context
 }> {
   const genericPath = join(dir, 'index.json')
-  writeFileSync(genericPath, JSON.stringify([legacySshRecordToWorkspaceRecord(record)]), 'utf8')
+  writeFileSync(genericPath, JSON.stringify([toWorkspaceRecord(record)]), 'utf8')
   const ctx = new Context()
   const fake = new FakeEngine()
   const providers = new WorkspaceProviderRegistry()
@@ -515,189 +497,5 @@ describe('local provider v2 generic seam', () => {
     })).toThrow('workspace.local-outside-root')
 
     await core.closeAll()
-  })
-})
-
-describe('cutover marker vs a missing ledger (P0-2)', () => {
-  /**
-   * Boot one migrated deployment: one legacy SSH record, a published marker and
-   * a committed generic ledger. Returns the paths and a live core.
-   */
-  async function migrated(prefix: string) {
-    const dir = mkdtempSync(join(tmpdir(), prefix))
-    const legacyPath = join(dir, 'legacy.json')
-    const genericPath = join(dir, 'index.json')
-    const reportPath = join(dir, 'migration-report.json')
-    const anchor = join(dir, 'ssh-anchor')
-    mkdirSync(anchor, { recursive: true })
-    const source: SshWorkspaceRecord = {
-      id: 'survivor', title: 'proj', alias: 'host', remoteRoot: '/srv/app', anchorPath: anchor, createdAt: '2025-01-01T00:00:00.000Z',
-    }
-    writeFileSync(legacyPath, JSON.stringify([source]), 'utf8')
-    const providers = new WorkspaceProviderRegistry()
-    providers.register(createSshWorkspaceProvider(asSshEngine(new FakeEngine()), new Context()))
-    const core = new DefaultWorkspaceCore(new WorkspaceLedger(genericPath), providers)
-    await bootstrapGenericWorkspaceCore(core, { legacyPath, genericPath, reportPath })
-    return { dir, legacyPath, genericPath, reportPath, core }
-  }
-
-  /** A fresh core over the same paths (no providers needed to observe the ledger). */
-  function reboot(genericPath: string): WorkspaceCore {
-    return new DefaultWorkspaceCore(new WorkspaceLedger(genericPath), new WorkspaceProviderRegistry())
-  }
-
-  it('restores a deleted ledger from the rolling .last-good copy instead of serving an empty set', async () => {
-    const { genericPath, legacyPath, reportPath, core } = await migrated('generic-missing-lastgood-')
-    expect((await core.list()).map(record => record.id)).toEqual(['survivor'])
-    await core.closeAll()
-
-    // Simulate a "cleanup" script removing the ledger: the marker survives and
-    // proves one workspace was committed, so boot must recover, not reset.
-    rmSync(genericPath)
-    const restored = reboot(genericPath)
-    await expect(bootstrapGenericWorkspaceCore(restored, { legacyPath, genericPath, reportPath })).resolves.toBeUndefined()
-    expect(restored.isReady()).toBe(true)
-    expect((await restored.list()).map(record => record.id)).toEqual(['survivor'])
-    expect(JSON.parse(readFileSync(genericPath, 'utf8'))).toHaveLength(1)
-    await restored.closeAll()
-  })
-
-  it('recovers from the newest .backup- snapshot when the ledger and .last-good are both gone', async () => {
-    const { genericPath, legacyPath, reportPath, core } = await migrated('generic-missing-backup-')
-    await core.closeAll()
-    const backup = JSON.parse(readFileSync(genericPath, 'utf8')) as unknown[]
-    rmSync(genericPath)
-    rmSync(`${genericPath}.last-good`, { force: true })
-    writeFileSync(`${genericPath}.backup-2026-01-01T00-00-00-000Z`, JSON.stringify(backup), 'utf8')
-
-    const restored = reboot(genericPath)
-    await bootstrapGenericWorkspaceCore(restored, { legacyPath, genericPath, reportPath })
-    expect((await restored.list()).map(record => record.id)).toEqual(['survivor'])
-    await restored.closeAll()
-  })
-
-  it('refuses to start when the ledger is gone and nothing can restore it', async () => {
-    const { genericPath, legacyPath, reportPath, core } = await migrated('generic-missing-no-source-')
-    await core.closeAll()
-    rmSync(genericPath)
-    rmSync(`${genericPath}.last-good`, { force: true })
-    // The frozen legacy source is gone too: there is genuinely nothing to restore.
-    rmSync(legacyPath)
-
-    const boot = reboot(genericPath)
-    await expect(bootstrapGenericWorkspaceCore(boot, { legacyPath, genericPath, reportPath }))
-      .rejects.toThrow(/is absent although the cutover marker .* reports 1 workspace/u)
-    // Not ready => the fs/subprocess seams fail closed instead of running local.
-    expect(boot.isReady()).toBe(false)
-  })
-
-  it('does NOT let an empty legacy source open the gate, and never downgrades the marker', async () => {
-    // Regression: recovery used to treat "a legacy file exists" as success
-    // without checking the result, and the re-import rewrote the marker with
-    // recordCount 0 — which permanently disarmed the gate it was meant to serve.
-    const { genericPath, legacyPath, reportPath, core } = await migrated('generic-empty-legacy-')
-    await core.closeAll()
-    rmSync(genericPath)
-    rmSync(`${genericPath}.last-good`, { force: true })
-    writeFileSync(legacyPath, '[]', 'utf8')
-    const markerBefore = JSON.parse(readFileSync(reportPath, 'utf8')) as { recordCount: number; ids: string[] }
-
-    const boot = reboot(genericPath)
-    await expect(bootstrapGenericWorkspaceCore(boot, { legacyPath, genericPath, reportPath }))
-      .rejects.toThrow(/legacy source is insufficient/u)
-    expect(boot.isReady()).toBe(false)
-    // Nothing was "restored", and the marker still proves what existed so the
-    // next boot refuses again instead of silently starting empty.
-    expect(existsSync(genericPath)).toBe(false)
-    const markerAfter = JSON.parse(readFileSync(reportPath, 'utf8')) as { recordCount: number; ids: string[] }
-    expect(markerAfter.recordCount).toBe(markerBefore.recordCount)
-    expect(markerAfter.ids).toEqual(markerBefore.ids)
-  })
-
-  it('accepts a legacy source that actually holds every recorded workspace', async () => {
-    const { genericPath, legacyPath, reportPath, core } = await migrated('generic-legacy-restore-')
-    const expected = (await core.list()).map(record => record.id)
-    await core.closeAll()
-    rmSync(genericPath)
-    rmSync(`${genericPath}.last-good`, { force: true })
-    // The legacy source is the original one (still holding the same record).
-    const boot = reboot(genericPath)
-    await bootstrapGenericWorkspaceCore(boot, { legacyPath, genericPath, reportPath })
-    expect((await boot.list()).map(record => record.id)).toEqual(expected)
-    await boot.closeAll()
-  })
-
-  it('rejects a recovery candidate that would restore FEWER workspaces than the marker recorded', async () => {
-    const { genericPath, legacyPath, reportPath, core } = await migrated('generic-partial-candidate-')
-    const full = JSON.parse(readFileSync(genericPath, 'utf8')) as unknown[]
-    await core.closeAll()
-    rmSync(genericPath)
-    rmSync(legacyPath)
-    // A stale .last-good holding an empty set must not be accepted as success.
-    writeFileSync(`${genericPath}.last-good`, JSON.stringify([]), 'utf8')
-
-    const boot = reboot(genericPath)
-    await expect(bootstrapGenericWorkspaceCore(boot, { legacyPath, genericPath, reportPath }))
-      .rejects.toThrow(/refusing to start with a reduced workspace set/u)
-    expect(boot.isReady()).toBe(false)
-    expect(full).toHaveLength(1)
-  })
-
-  it('recovers from .last-good when the ledger exists but is corrupt', async () => {
-    const { genericPath, legacyPath, reportPath, core } = await migrated('generic-corrupt-ledger-')
-    await core.closeAll()
-    // Present but unparseable: previously this only failed the boot closed with
-    // no attempt to restore, because recovery keyed on file ABSENCE alone.
-    writeFileSync(genericPath, '{ truncated', 'utf8')
-
-    const boot = reboot(genericPath)
-    await bootstrapGenericWorkspaceCore(boot, { legacyPath, genericPath, reportPath })
-    expect((await boot.list()).map(record => record.id)).toEqual(['survivor'])
-    // The recovery left durable, user-inspectable evidence beside the ledger.
-    const report = JSON.parse(readFileSync(join(genericPath, '..', 'recovery-report.json'), 'utf8')) as {
-      source: string
-      restoredRecordCount: number
-      markerRecordCount: number
-    }
-    expect(report.source).toBe('last-good')
-    expect(report.restoredRecordCount).toBe(1)
-    expect(report.markerRecordCount).toBe(1)
-    await boot.closeAll()
-  })
-
-  it('keeps an existing but EMPTY ledger authoritative (deleting every workspace is a real intent)', async () => {
-    const { genericPath, legacyPath, reportPath, core } = await migrated('generic-deliberately-empty-')
-    await core.closeAll()
-    writeFileSync(genericPath, '[]', 'utf8')
-
-    const boot = reboot(genericPath)
-    await expect(bootstrapGenericWorkspaceCore(boot, { legacyPath, genericPath, reportPath })).resolves.toBeUndefined()
-    expect(boot.isReady()).toBe(true)
-    expect(await boot.list()).toEqual([])
-    await boot.closeAll()
-  })
-
-  it('treats a marker with zero records as a legitimately empty deployment', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'generic-missing-empty-'))
-    const legacyPath = join(dir, 'legacy.json')
-    const genericPath = join(dir, 'index.json')
-    const reportPath = join(dir, 'migration-report.json')
-    writeFileSync(reportPath, JSON.stringify({
-      schemaVersion: 1,
-      mode: 'generic',
-      createdAt: '2026-01-01T00:00:00.000Z',
-      status: 'unchanged',
-      sourceDigest: 'a'.repeat(64),
-      targetDigest: 'b'.repeat(64),
-      recordCount: 0,
-      ids: [],
-      differences: [],
-    }), 'utf8')
-
-    const boot = reboot(genericPath)
-    await expect(bootstrapGenericWorkspaceCore(boot, { legacyPath, genericPath, reportPath })).resolves.toBeUndefined()
-    expect(boot.isReady()).toBe(true)
-    expect(await boot.list()).toEqual([])
-    await boot.closeAll()
   })
 })
