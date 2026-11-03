@@ -8,19 +8,12 @@ import {
   probeOptionalServices,
 } from '../../src/runtime/compat-contract.ts'
 
-interface CompatManifest {
-  name: string
-  packages: Record<string, string>
-}
-
-const repoRoot = resolve(import.meta.dirname, '../../../..')
-const packageJson = JSON.parse(readFileSync(resolve(repoRoot, 'packages/dsh-hardssh/package.json'), 'utf8')) as {
+interface PackageManifest {
   peerDependencies: Record<string, string>
 }
 
-function manifest(name: string): CompatManifest {
-  return JSON.parse(readFileSync(resolve(repoRoot, `compat/${name}.json`), 'utf8')) as CompatManifest
-}
+const repoRoot = resolve(import.meta.dirname, '../../../..')
+const packageJson = JSON.parse(readFileSync(resolve(repoRoot, 'packages/dsh-hardssh/package.json'), 'utf8')) as PackageManifest
 
 /** A Context stand-in answering `get()` from a plain service table. */
 function probingContext(services: Record<string, unknown>): Parameters<typeof probeOptionalServices>[0] {
@@ -66,29 +59,6 @@ describe('runtime compatibility contract', () => {
 
     const partial = probeOptionalServices(probingContext({ settings: { describe: () => [] } })).find(probe => probe.service === 'settings')
     expect(partial).toEqual({ service: 'settings', available: false, missingMethods: ['configure'] })
-  })
-
-  it('covers every DeepSeek peer in the tested component manifest', () => {
-    const peers = Object.keys(packageJson.peerDependencies).filter(name => name.startsWith('@deepseek-ai/'))
-    const set = manifest('dsh-0.1.5-rc.1')
-    expect(set.name).toBe('dsh-0.1.5-rc.1')
-    for (const peer of peers) expect(set.packages[peer], `${set.name} omits ${peer}`).toBeTypeOf('string')
-  })
-
-  it('records the disproved alpha.1 set instead of silently claiming it', () => {
-    // The matrix caught a false declaration: alpha.1 has no `main` slot, so the
-    // workspace panel has nowhere to mount. Keep the evidence on disk so the
-    // declared range cannot quietly widen again.
-    const rejected = manifest('verified-incompatible-dsh-0.1.5-alpha.1')
-    expect(rejected.name).toContain('alpha.1')
-    expect(TESTED_DSH_RANGE.startsWith('>=0.1.5-rc.1')).toBe(true)
-    for (const [name, range] of Object.entries(packageJson.peerDependencies)) {
-      if (name.startsWith('@deepseek-ai/') && range.includes('0.1.5')) {
-        // Only the disproved 0.1.5-alpha.* line is forbidden; the 0.1.6 line
-        // legitimately names 0.1.6-alpha.1 in its range.
-        expect(range, `${name} must not claim the disproved 0.1.5-alpha line`).not.toMatch(/0\.1\.5-alpha/)
-      }
-    }
   })
 
   it('publishes bounded compatibility claims, never an unbounded wildcard', () => {

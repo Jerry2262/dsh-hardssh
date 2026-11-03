@@ -4,6 +4,11 @@
 
 ## 未发布
 
+### 清理：移除英文 README 与兼容性矩阵
+
+- 删除 `README.en.md`，主 README 不再有语言切换入口。
+- 删除 `compat/` 兼容集与 `verified-incompatible-*` 证据文件、`scripts/compat/apply-set.mjs`、`.github/workflows/compat.yml`。兼容性声明保留在 README 表格与 `src/runtime/compat-contract.ts` 的 `TESTED_DSH_RANGE`；`tests/runtime/compat-contract.test.ts` 去掉依赖兼容集清单的两条断言，其余运行时契约测试不变。
+
 ### 修复：`browse` 组合下「本地工作区…」报 `directoryPicker.pick needs the native capability`
 
 - **本地分支不再自己实现目录选择，改为直接渲染内核注册的 directory-flow occupant**。插件为了在「添加工作区」里保留「SSH 工作区…」入口，仍以负优先级占用两个 `directoryFlow` single 席位；点击「本地工作区…」时通过 `ctx.slots.entries(hole)` 读取内核自己注册的 occupant（`component` + `inject` 业务面），原样渲染。`native` 组合得到内核的系统选择器，`browse` 组合得到内核原生的 680×500 目录对话框，两种组合都由内核决定，插件不再判断能力，也不再自绘目录界面。

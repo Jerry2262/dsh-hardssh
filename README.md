@@ -5,8 +5,6 @@
 [![license](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 [![dsh-plugin](https://img.shields.io/badge/topic-dsh--plugin-7a3ef3)](https://github.com/topics/dsh-plugin)
 
-**中文** · [English](./README.en.md)
-
 **【DeepSeek Harness (DSH) 的 SSH 工作区 + SSH 运维插件】** · 已适配 DSH **0.1.5 ~ 0.2.1**，**含官方桌面版（Electron）**
 
 把服务器上的任意目录变成 **SSH 工作区**：绑定后，该会话里的文件读写与命令执行**透明地运行在远端主机**，
@@ -155,12 +153,12 @@ NPM 包页面：https://www.npmjs.com/package/@tiphareth/dsh-hardssh
 
 | 插件版本 | 已验证 DSH | Node | 远端主机 |
 |---|---|---|---|
-| `0.2.7`（当前） | **`0.2.1-rc.5` / `0.2.0-rc.2`（桌面版 Electron 实测）** + `>=0.1.5-rc.1 <0.1.7 \|\| >=0.1.6-alpha.1`（0.1.x 矩阵四条线全绿：`0.1.5-rc.1` / `0.1.5-rc.2` / `0.1.6-alpha.1` / `0.1.6-alpha.2`） | `^22.19.0 \|\| >=24.0.0` | POSIX（GNU 工具链实测：CentOS/RHEL；BSD/BusyBox 缺 GNU 参数时自动退回 SFTP，功能受限但可用） |
-| `0.2.5` ~ `0.2.6-alpha` | `>=0.1.5-rc.1 <0.1.7 \|\| >=0.1.6-alpha.1`（同上四条线） | 同上 | 同上 |
+| `0.2.7`（当前） | **`0.2.1-rc.5` / `0.2.0-rc.2`（桌面版 Electron 实测）** + `>=0.1.5-rc.1 <0.1.7 \|\| >=0.1.6-alpha.1`（历史兼容线：`0.1.5-rc.1` / `0.1.5-rc.2` / `0.1.6-alpha.1` / `0.1.6-alpha.2`） | `^22.19.0 \|\| >=24.0.0` | POSIX（GNU 工具链实测：CentOS/RHEL；BSD/BusyBox 缺 GNU 参数时自动退回 SFTP，功能受限但可用） |
+| `0.2.5` ~ `0.2.6-alpha` | `>=0.1.5-rc.1 <0.1.7 \|\| >=0.1.6-alpha.1`（同上历史线） | 同上 | 同上 |
 
-> 0.2.x 线的说明：宿主侧（插件激活、路由、工作区注册进官方 `ctx.workspace`）已在 **桌面版 0.2.1-rc.5 / 0.2.0-rc.2** 上实测通过；客户端会话跟随已按 0.2.x 的新会话 API（`retainedBy.mainView`）适配。0.1.x 的四条线由 `compat/dsh-*.json` 兼容集与 CI 矩阵保证；**0.2.x 的兼容集尚未加入矩阵**（见 `compat/README.md` 的约定）。
+> 0.2.x 线的说明：宿主侧（插件激活、路由、工作区注册进官方 `ctx.workspace`）已在 **桌面版 0.2.1-rc.5 / 0.2.0-rc.2** 上实测通过；客户端会话跟随已按 0.2.x 的新会话 API（`retainedBy.mainView`）适配。兼容性验证以当前 0.2.x 实测为准。
 
-> 更早的 `0.1.5-alpha.1` **不支持**：`dsh-client-ui-slots@0.1.5-alpha.1` 没有 `main` 槽位，工作区面板无处挂载（矩阵实测 typecheck 直接失败）。见 `compat/README.md`。
+> 更早的 `0.1.5-alpha.1` **不支持**：`dsh-client-ui-slots@0.1.5-alpha.1` 没有 `main` 槽位，工作区面板无处挂载（历史实测 typecheck 直接失败）。
 
 - **内核侧契约**：插件实际使用的运行时导出（`FileSystem`/`FsError`/`SubprocessRuntime`/`SandboxedFileSystem`/`defineTool` 等）都由 `src/runtime/compat-contract.ts` 列明，并在测试里逐个 import 校验；`peerDependencies` 不再使用无边界 `"*"`。
 - **可选集成**：`settings` / `systemPrompt` / `webServer` / 客户端 slot 缺失时**降级而不是失败**——插件照常加载，只是少了对应界面。
