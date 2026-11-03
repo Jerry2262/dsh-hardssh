@@ -76,6 +76,8 @@
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run --exclude tests/ssh/vault.test.ts",
     "test:all": "vitest run",
+    "test:changed": "vitest run --changed --exclude tests/ssh/vault.test.ts --bail=1 --passWithNoTests",
+    "test:related": "vitest related --exclude tests/ssh/vault.test.ts --bail=1 --passWithNoTests",
     "test:vault": "vitest run tests/ssh/vault.test.ts",
     "prepare": "tsdown"
   },

@@ -268,13 +268,21 @@ dsh-hardssh: 已阻止在 login-node 上执行该命令（命中该主机的禁�
 ```sh
 pnpm install
 pnpm --filter @tiphareth/dsh-hardssh typecheck   # 类型检查
-pnpm test                                        # 测试（默认套件 ~12s；vault 用例已移出）
-pnpm test:vault                                  # 只跑 vault 加密用例（~21s，scrypt 故意慢）
 pnpm --filter @tiphareth/dsh-hardssh build       # 构建（lib/ 产物）
+
+# 开发期快速反馈：只跑与改动相关的用例
+pnpm test:changed                                # 未提交改动（自 HEAD 起）相关的用例，失败即停
+pnpm test:related src/ssh/engine.ts               # 指定源码文件关联的用例
+pnpm exec vitest run tests/ssh/engine.test.ts     # 最直接：只跑一个测试文件
+
+# 提交前：全量默认套件（排除慢速 vault 用例；约 25–30s）
+pnpm test
+pnpm test:vault                                  # 只跑 vault 加密用例（~21s，scrypt 故意慢）
 ```
 
-打包部署：`pnpm --filter @tiphareth/dsh-hardssh pack --pack-destination dist`，
-将 tarball 装入 profile（`pnpm add file:...`）后重启 `dsh web`。
+全量套件在 commit 前跑一次即可，开发中只跑相关用例；需要时把全量放后台跑，别阻塞手头的改动。
+
+部署：profile 用 `link:` 指向本仓库，构建后重启 `dsh web` 即生效。
 
 ## FAQ
 
