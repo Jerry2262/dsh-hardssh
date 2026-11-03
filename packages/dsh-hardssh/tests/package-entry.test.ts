@@ -17,7 +17,9 @@ const packageRoot = fileURLToPath(new URL('..', import.meta.url))
 /** The manifest fields this suite asserts on. */
 interface PackageManifest {
   exports: Record<string, { types?: string; default?: string }>
-  files: string[]
+  private?: boolean
+  files?: string[]
+  publishConfig?: unknown
 }
 
 /** Parsed package.json of @tiphareth/dsh-hardssh. */
@@ -40,8 +42,15 @@ describe('public base entry (C-02)', () => {
     expect(exports['./client']?.default).toBe('./lib/client.js')
   })
 
-  it('ships the nested base artifact in the published files list', () => {
-    expect(manifest().files).toContain('lib/base/*.js')
+  it('carries no npm publication metadata (self-use profile install)', () => {
+    const manifest = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as {
+      private?: boolean
+      files?: unknown
+      publishConfig?: unknown
+    }
+    expect(manifest.private).toBe(true)
+    expect(manifest.files).toBeUndefined()
+    expect(manifest.publishConfig).toBeUndefined()
   })
 
   it('declares src/base/index.ts as a real tsdown entry', () => {

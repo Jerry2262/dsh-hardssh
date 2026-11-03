@@ -36,6 +36,7 @@ import type { HardsshCore } from './core.ts'
 import { anchorRoot } from './ledger.ts'
 import { GenericWorkspaceStore, type WorkspaceStoreView } from './backend.ts'
 import { makeRoutes, reconcileHostWorkspaces, type HostWorkspaceReconcileDeps, type HostWorkspaceReconcileReport } from './routes.ts'
+import { RemoteSandboxProvisioner } from './sandbox/remote-sandbox.ts'
 import { makeWorkspaceTools } from './tools.ts'
 import { capabilityToolOpsResolver } from './workspace-tool-ops.ts'
 import { SshEngine } from './ssh/engine.ts'
@@ -385,6 +386,12 @@ export function apply(ctx: Context, config?: Config): void {
     vault?.dispose()
   }, 'dsh-hardssh: engine')
 
+  // Remote-world execution precondition: the vendored Landlock launcher is
+  // provisioned into the bound host's home on first use and verified by probe.
+  // Creation and execution both fail closed when it cannot be provided.
+  const remoteSandbox = new RemoteSandboxProvisioner(engine)
+  ctx.provide('hardsshSandbox', remoteSandbox)
+
   // Canonical provider-neutral workspace runtime. It is the only in-process
   // ledger/router used by fs, subprocess, routes, tools and host-delete guards.
   const genericCore = mountWorkspaceCore(ctx, { engine, hosts })
@@ -482,6 +489,7 @@ export function apply(ctx: Context, config?: Config): void {
     hosts,
     engine,
     workspaces,
+    sandbox: remoteSandbox,
     registerHostWorkspace,
     unregisterHostWorkspace,
   })

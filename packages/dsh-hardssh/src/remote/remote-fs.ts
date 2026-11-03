@@ -26,6 +26,8 @@ import type {
   FsWriteIntent,
   FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
+import type { SandboxExecutionPolicy } from '@deepseek-ai/dsh-sandbox'
+import { assertRemoteWritable } from '../sandbox/write-fence.ts'
 import type { WorkspaceState } from '../protocol.ts'
 import { quoteShellArg } from './environment.ts'
 
@@ -428,8 +430,10 @@ export class SshFileSystem extends FileSystem {
     content: string,
     expected?: FsWriteIntent,
     signal?: AbortSignal,
+    sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsWriteOutcome> {
     target = await this.canonicalTarget(target, signal)
+    assertRemoteWritable(String(target.targetKey), target.displayPath, sandboxPolicy)
     const targetPath = this.processPath(target)
     return this.withLock(targetPath, async () => {
       const existing = await this.probe(String(target.targetKey), target.displayPath, signal)
@@ -453,8 +457,10 @@ export class SshFileSystem extends FileSystem {
     edit: FsEditRequest,
     expected?: { version: ReturnType<typeof FsVersion> },
     signal?: AbortSignal,
+    sandboxPolicy?: SandboxExecutionPolicy,
   ): Promise<FsEditOutcome> {
     target = await this.canonicalTarget(target, signal)
+    assertRemoteWritable(String(target.targetKey), target.displayPath, sandboxPolicy)
     const targetPath = this.processPath(target)
     return this.withLock(targetPath, async () => {
       const existing = await this.probe(String(target.targetKey), target.displayPath, signal)

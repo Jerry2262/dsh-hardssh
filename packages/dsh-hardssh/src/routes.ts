@@ -20,6 +20,7 @@ import { isLoopbackRequest, queryParam, readJsonBody as readJsonBodyShared, writ
 import type { WorkspaceStoreView } from './backend.ts'
 import { BackendError, backendErrorStatus, sortWorkspaceEntries } from './backend.ts'
 import { WORKSPACE_API } from './protocol.ts'
+import { RemoteSandboxError, type RemoteSandboxProvisioner } from './sandbox/remote-sandbox.ts'
 
 /** Cap on JSON request bodies (file writes carry content). */
 const MAX_JSON_BODY_BYTES = 4 * 1024 * 1024
@@ -69,6 +70,10 @@ function writeRouteError(res: ServerResponse, error: unknown, ioStatus: 500 | 50
   }
   if (error instanceof HostKeyMismatchError) {
     writeJson(res, 500, { error: error.message, code: 'HOST_KEY_MISMATCH', hostKeyFingerprint: error.actual })
+    return
+  }
+  if (error instanceof RemoteSandboxError) {
+    writeJson(res, error.status, { error: error.message, code: error.code })
     return
   }
   writeJson(res, ioStatus, { error: error instanceof Error ? error.message : String(error), code: 'io' })
@@ -139,6 +144,10 @@ export interface WorkspaceRoutesDeps {
   /** SSH-workspace record source: the generic WorkspaceCore-backed
    *  projection store (the only runtime). */
   workspaces: WorkspaceStoreView
+  /** Remote-world execution precondition: provision + verify the Landlock
+   *  launcher before a workspace may be created. Omitted only by fixtures that
+   *  do not exercise the remote sandbox. */
+  sandbox?: Pick<RemoteSandboxProvisioner, 'ensure'>
   /** Register the anchor dir as a HOST workspace (sidebar visibility). */
   registerHostWorkspace?: (anchorPath: string, title: string) => Promise<void>
   /** Drop the host workspace registration for an anchor dir. */
@@ -250,6 +259,18 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
           }
           writeRouteError(res, error, 502)
           return
+        }
+        // Declared precondition: the host must provide a working Landlock
+        // launcher before the workspace exists. Provisioning errors (unsupported
+        // kernel/arch, upload failure) are actionable refusals, never degraded
+        // execution.
+        if (deps.sandbox !== undefined) {
+          try {
+            await deps.sandbox.ensure(alias)
+          } catch (error) {
+            writeRouteError(res, error, 502)
+            return
+          }
         }
         try {
           const { record, created } = await workspaces.create({ title, alias, remoteRoot: canonicalRoot })

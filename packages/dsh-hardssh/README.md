@@ -86,16 +86,17 @@
 
 ## 安装
 
+本项目自用，不发布 npm；profile 直接链接本仓库源码：
+
 ```sh
-# 已发布 npm，latest = 0.2.7（含 dsh 0.2.0 / 0.2.1 与桌面版支持）
-dsh plugin --profile web add @tiphareth/dsh-hardssh
+# 先构建 lib/
+pnpm --filter @tiphareth/dsh-hardssh build
 
-# 需要固定版本时
-dsh plugin --profile web add @tiphareth/dsh-hardssh@0.2.7
-
-# 开发/迭代：源码链接（改码重建 lib/ 后重启即生效）
+# 把包加入 profile 依赖
 dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 ```
+
+再把 `"@tiphareth/dsh-hardssh"` 加入 profile 的 `dsh.profile.bundles`，重启 `dsh` 生效。
 
 **桌面版（Electron）dsh**：可以正常加载本插件，但它的 `desktop` profile 由应用独占管理——
 普通 CLI 执行 `dsh plugin --profile desktop …` 会被拒绝

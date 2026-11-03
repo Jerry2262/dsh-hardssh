@@ -25,7 +25,7 @@
 
 这是本插件与其他 SSH 方案最本质的区别：**不修改官方内核，只替换 DSH 的服务 seam。**
 
-`cordis.patch.yml` 把部署自带的 `fs-sandbox` / `subprocess` 两行禁用，改由本插件提供路由门面。
+`cordis.patch.yml` 把部署自带的 `fs-sandbox` / `subprocess` / `bash-sandbox` 三行禁用，改由本插件提供路由门面（fs / subprocess / shell）。
 因此**任何通过标准 `ctx.fs` / `ctx.subprocess` 接口工作的插件**，在 SSH 工作区会话里都自动运行在远端主机上——
 不需要该插件写一行 SSH 代码，也不需要它知道远端的存在。
 
@@ -101,29 +101,22 @@ WorkspaceRecord / WorkspaceProvider / WorkspaceConnection / 能力(capability)
 
 ## 安装
 
-已发布到 npm，当前 **`latest = 0.2.7`**（含 dsh 0.2.0 / 0.2.1 与桌面版支持）：
+本项目自用，不发布 npm；profile 直接链接本仓库源码：
 
 ```sh
-# 一行安装（跟随 latest）
-dsh plugin --profile web add @tiphareth/dsh-hardssh
+# 先构建 lib/
+pnpm --filter @tiphareth/dsh-hardssh build
 
-# 需要固定版本时
-dsh plugin --profile web add @tiphareth/dsh-hardssh@0.2.7
-```
-
-开发/迭代用本机源码或本地 tarball：
-
-```sh
-# 源码链接（改码后重建 lib/ 并重启 dsh 即生效，无需重新打包）
+# 把包加入 profile 依赖
 dsh plugin --profile web add link:</path/to/dsh-hardssh>/packages/dsh-hardssh
-
-# 或先打包，再安装 tarball
-pnpm --filter @tiphareth/dsh-hardssh pack --pack-destination dist
-dsh plugin --profile web add </path/to/dsh-hardssh>/dist/tiphareth-dsh-hardssh-0.2.7.tgz
 ```
 
-手工方式：把包加入 profile 的 `dependencies`（`file:...` 指向 tarball）与
-`dsh.profile.bundles` 列表，重启 `dsh` 生效。
+再把 `"@tiphareth/dsh-hardssh"` 加入 `~/.dsh/profiles/web/package.json` 的
+`dsh.profile.bundles` 列表，重启 `dsh` 生效。改码后重新 `build`（产出 `lib/`）并重启
+`dsh web` 即可，无需打包。
+
+也可以手工编辑 profile 的 `dependencies`（`link:...` 指向本仓库）与
+`dsh.profile.bundles`，效果相同。
 
 ### 桌面版（Electron）dsh
 
@@ -144,19 +137,26 @@ dsh plugin --profile web add </path/to/dsh-hardssh>/dist/tiphareth-dsh-hardssh-0
 
 > 已知边界：桌面版自带 dsh 的版本号即应用内置的核心版本（实测 `0.2.1-rc.5`，以应用发布为准）；插件声明的 peer 区间不设 0.2.x 上限，因此 0.2.x 的后续版本可直接加载。
 
-NPM 包页面：https://www.npmjs.com/package/@tiphareth/dsh-hardssh
-
 > seam 替换机制见上文「核心优势 1」：它把「内核版本适配」压缩成很薄的一层，但**并不是零**——
 > 插件仍静态依赖 DSH 的公共契约，因此声明了明确的支持区间，见下表。
+
+## 远端沙箱前置条件
+
+SSH 工作区的 `bash` 在远端执行时，文件写入必须由执行侧的沙箱约束。插件为此自动部署一个静态 Landlock launcher 到远端（不需要 root、sudo 或包管理器，类似 VS Code Remote 往远端装 server）：
+
+- 支持远端：Linux x86_64 / aarch64，内核 ≥5.13 且启用 Landlock（现代 Ubuntu/Debian/RHEL 默认满足）。
+- 创建 SSH 工作区时会把 `landlock-run` 上传到远端 `~/.dsh-hardssh/sandbox/runner-<sha>/`，执行 `--probe` 和一次“只读 profile 必须拒绝写入”的 smoke；任何一步失败都会**拒绝创建**并给出原因，不降级成无约束执行。
+- 会话权限 preset 在远端同样生效：`read-only` 下远端 bash 的写入被拒绝，`write` / `edit` 也拒绝；`workspace-write` 限远端工作区根与远端 `/tmp`；`danger-full-access` 不包装（与本地一致）。
+- `commandPolicy`（主机命令守卫）仍是**护栏（guardrail）**，不是沙箱；文件写入的硬约束由上面的 Landlock 与远端 fs 围栏提供。
 
 ## 兼容性
 
 | 插件版本 | 已验证 DSH | Node | 远端主机 |
 |---|---|---|---|
-| `0.2.7`（当前） | **`0.2.1-rc.5` / `0.2.0-rc.2`（桌面版 Electron 实测）** + `>=0.1.5-rc.1 <0.1.7 \|\| >=0.1.6-alpha.1`（历史兼容线：`0.1.5-rc.1` / `0.1.5-rc.2` / `0.1.6-alpha.1` / `0.1.6-alpha.2`） | `^22.19.0 \|\| >=24.0.0` | POSIX（GNU 工具链实测：CentOS/RHEL；BSD/BusyBox 缺 GNU 参数时自动退回 SFTP，功能受限但可用） |
+| `0.2.7`（当前） | **`0.2.1-rc.5` / `0.2.0-rc.2`（桌面版 Electron 实测）** + `>=0.1.5-rc.1 <0.1.7 \|\| >=0.1.6-alpha.1`（历史兼容线：`0.1.5-rc.1` / `0.1.5-rc.2` / `0.1.6-alpha.1` / `0.1.6-alpha.2`） | `^22.19.0 \|\| >=24.0.0` | POSIX（GNU 工具链实测：CentOS/RHEL；BSD/BusyBox 缺 GNU 参数时自动退回 SFTP，功能受限但可用）。SSH 工作区的 bash 需要远端 Linux + Landlock（≥5.13，x86_64/aarch64） |
 | `0.2.5` ~ `0.2.6-alpha` | `>=0.1.5-rc.1 <0.1.7 \|\| >=0.1.6-alpha.1`（同上历史线） | 同上 | 同上 |
 
-> 0.2.x 线的说明：宿主侧（插件激活、路由、工作区注册进官方 `ctx.workspace`）已在 **桌面版 0.2.1-rc.5 / 0.2.0-rc.2** 上实测通过；客户端会话跟随已按 0.2.x 的新会话 API（`retainedBy.mainView`）适配。兼容性验证以当前 0.2.x 实测为准。
+> 0.2.x 线的说明：宿主侧（插件激活、路由、工作区注册进官方 `ctx.workspace`）已在 **桌面版 0.2.1-rc.5 / 0.2.0-rc.2** 上实测通过；**远端沙箱权限语义（Landlock shell seam）接在 0.2.x 的 `ctx.shell.execute` API 上，0.1.x 宿主加载 `hardssh-shell` 会明确拒绝而不是静默降级**；客户端会话跟随已按 0.2.x 的新会话 API（`retainedBy.mainView`）适配。兼容性验证以当前 0.2.x 实测为准。
 
 > 更早的 `0.1.5-alpha.1` **不支持**：`dsh-client-ui-slots@0.1.5-alpha.1` 没有 `main` 槽位，工作区面板无处挂载（历史实测 typecheck 直接失败）。
 
@@ -250,7 +250,7 @@ dsh-hardssh: 已阻止在 login-node 上执行该命令（命中该主机的禁�
 
 ### 诚实边界
 
-这是**护栏（guardrail），不是沙箱**：`$(…)`、base64 解出再跑、脚本内部稍后调用计算命令，都能绕过。它的价值是**防止误用 + 把 agent 引导到提交路径**；真正的硬约束应放在服务器侧（Slurm 分区限额、`pam_slurm_adopt`、PATH 里的 shim）。
+**主机命令守卫**是**护栏（guardrail），不是沙箱**：`$(…)`、base64 解出再跑、脚本内部稍后调用计算命令，都能绕过。它的价值是**防止误用 + 把 agent 引导到提交路径**；真正的硬约束应放在服务器侧（Slurm 分区限额、`pam_slurm_adopt`、PATH 里的 shim）。
 另外 `bash` 本身不建议放进 `denyCommands`：它会被当作**包装词**剥壳（这正是能抓到 `bash -c python` 的原因），把它列为禁止名会连 `bash` 工具自身的每个 spawn 一起拦掉。
 
 ## 数据位置

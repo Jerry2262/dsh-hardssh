@@ -30,6 +30,8 @@
     "src/index.ts",
     "src/fs.ts",
     "src/subprocess.ts",
+    "src/shell-executor.ts",
+    "src/sandbox/**/*.ts",
     "src/workspace.ts",
     "src/core.ts",
     "src/protocol.ts",

@@ -49,7 +49,7 @@ describe('SwitchFileSystem cwd routing', () => {
     expect(facade.sandboxMode).toBe('workspace-write')
   })
 
-  it('drops a per-call escalation policy on remote worlds but forwards it locally', async () => {
+  it('forwards a per-call policy locally and translates the workspace root for remote worlds', async () => {
     const localWrite = vi.fn(async () => ({ operation: 'update', version: 'v1', before: null, after: 'x' }))
     const remoteWrite = vi.fn(async () => ({ operation: 'update', version: 'v1', before: null, after: 'x' }))
     const local = { writeText: localWrite, sandboxMode: 'workspace-write' } as unknown as FileSystem
@@ -69,8 +69,9 @@ describe('SwitchFileSystem cwd routing', () => {
 
     await facade.writeText(target('wfs://ws-1/remote-key', '/remote/r/x'), 'x', undefined, undefined, policy)
     expect(remoteWrite).toHaveBeenCalledTimes(1)
-    // The 5th argument is the local-only policy: remote worlds must not receive it.
-    expect(remoteWrite.mock.calls[0][4]).toBeUndefined()
+    // The remote backend enforces the SAME mode, with the workspace root
+    // translated from the client anchor to the server root.
+    expect(remoteWrite.mock.calls[0][4]).toEqual({ mode: 'danger-full-access', workspaceRoot: '/remote/r' })
   })
 
   it('refuses a protected client directory through every path entry point (P1-3)', async () => {

@@ -1,26 +1,9 @@
 {
   "name": "@tiphareth/dsh-hardssh",
   "description": "Generic workspace base for the dsh harness (local + remote workspace providers with per-workspace routing), with SSH as one concrete provider: bind a server directory as an SSH workspace so the session's file I/O and commands run on that host, manage hosts and workspaces in the GUI, and operate remote servers through the ssh_* / remote_* agent tools",
+  "private": true,
   "version": "0.2.7",
   "type": "module",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/tiphareth0/dsh-hardssh.git",
-    "directory": "packages/dsh-hardssh"
-  },
-  "homepage": "https://github.com/tiphareth0/dsh-hardssh",
-  "bugs": {
-    "url": "https://github.com/tiphareth0/dsh-hardssh/issues"
-  },
-  "keywords": [
-    "dsh",
-    "deepseek-harness",
-    "dsh-plugin",
-    "workspace",
-    "ssh",
-    "remote-development",
-    "sftp"
-  ],
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },
@@ -52,7 +35,11 @@
       "default": "./lib/client.js"
     },
     "./src/*": "./src/*",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./shell-executor": {
+      "types": "./lib/types/shell-executor.d.ts",
+      "default": "./lib/shell-executor.js"
+    }
   },
   "dsh": {
     "bundle": {
@@ -114,6 +101,8 @@
     "@deepseek-ai/cordis": "^4.0.2",
     "@deepseek-ai/dsh-agent": "0.1.5-rc.1",
     "@deepseek-ai/dsh-api-workspace-files": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-bash-local": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-bash-sandbox": "0.2.1-rc.5",
     "@deepseek-ai/dsh-client-connection": "0.1.5-rc.1",
     "@deepseek-ai/dsh-client-locale": "0.1.5-rc.1",
     "@deepseek-ai/dsh-client-runtime": "0.1.1-rc.2",
@@ -133,19 +122,20 @@
     "@deepseek-ai/dsh-http-proxy": "0.1.5-rc.1",
     "@deepseek-ai/dsh-invariants": "0.1.5-rc.1",
     "@deepseek-ai/dsh-llm": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-sandbox": "0.1.5-rc.1",
-    "@deepseek-ai/dsh-sandbox-policy": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-sandbox": "0.2.1-rc.5",
+    "@deepseek-ai/dsh-sandbox-policy": "0.2.1-rc.5",
     "@deepseek-ai/dsh-scope": "0.1.5-rc.1",
     "@deepseek-ai/dsh-session": "0.1.5-rc.1",
     "@deepseek-ai/dsh-session-projection": "0.1.5-rc.1",
     "@deepseek-ai/dsh-settings": "0.1.5-rc.1",
+    "@deepseek-ai/dsh-shell": "0.2.1-rc.5",
     "@deepseek-ai/dsh-subprocess": "0.1.5-rc.1",
     "@deepseek-ai/dsh-subprocess-local": "0.1.5-rc.1",
     "@deepseek-ai/dsh-system-prompt": "0.1.5-rc.1",
     "@deepseek-ai/dsh-timeout": "0.1.5-rc.1",
     "@deepseek-ai/dsh-tools": "0.1.5-rc.1",
     "@deepseek-ai/dsh-user-approval": "0.1.5-rc.1",
-    "@deepseek-ai/schemastery": "^3.18.2",
+    "@deepseek-ai/schemastery": "~3.18.5",
     "@types/node": "^22.20.0",
     "@types/react": "~18.3.1",
     "@types/react-dom": "^18.3.5",
@@ -158,14 +148,5 @@
     "typescript": "catalog:",
     "vitest": "catalog:"
   },
-  "files": [
-    "lib/*.js",
-    "lib/base/*.js",
-    "lib/types/**/*.d.ts",
-    "src",
-    "cordis.patch.yml",
-    "README.md",
-    "SKILLS.md"
-  ],
   "license": "BSD-3-Clause"
 }

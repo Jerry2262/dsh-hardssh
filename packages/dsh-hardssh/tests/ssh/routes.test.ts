@@ -942,7 +942,10 @@ describe('vault error status mapping', () => {
       await mapped.routes.dispose()
       await closeServer(mapped.server)
     }
-  })
+    // Two full scrypt derives (N=131072, ~0.7s each alone). Under the parallel
+    // default suite the CPU contention pushes this past the 5s default budget;
+    // the lockout case below already carries the same explicit allowance.
+  }, 30_000)
 
   it('maps a lockout to 429 VAULT_LOCKOUT with retryAfterMs', async () => {
     // Reaching the lockout needs 5 wrong unlocks, each a full scrypt derive

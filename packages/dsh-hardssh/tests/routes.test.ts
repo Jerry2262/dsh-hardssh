@@ -69,6 +69,9 @@ function send(method: string, path: string, body?: unknown): Promise<HttpRespons
 
 const get = (path: string): Promise<HttpResponse> => send('GET', path)
 
+/** Provisioning hook: tests steer the declared precondition per create. */
+const sandboxEnsure = vi.fn(async (_alias: string) => ({ alias: _alias, enforcement: 'full' }))
+
 beforeAll(async () => {
   // Generic runtime (fake engine only): initialize the ledger, then wrap the
   // core in the projection store.
@@ -90,6 +93,7 @@ beforeAll(async () => {
       stat: async () => ({ type: 'dir', size: 0, mtimeMs: 0, mode: 0o755 }),
     } as never,
     workspaces: store,
+    sandbox: { ensure: alias => sandboxEnsure(alias) },
     registerHostWorkspace: async () => undefined,
     unregisterHostWorkspace: async () => undefined,
   })
@@ -602,5 +606,30 @@ describe('host-delete reference guard over the generic record source', () => {
     expect(freed.status).toBe(200)
     expect(deleteSpy).toHaveBeenCalledTimes(1)
     expect(deleteSpy).toHaveBeenCalledWith('host')
+  })
+})
+
+
+describe('remote sandbox precondition at workspace creation', () => {
+  it('refuses creation with the actionable sandbox error and creates nothing', async () => {
+    const { RemoteSandboxError } = await import('../src/sandbox/remote-sandbox.ts')
+    sandboxEnsure.mockRejectedValueOnce(new RemoteSandboxError(
+      "remote sandbox: the kernel on 'host' does not enforce Landlock",
+      'REMOTE_SANDBOX_PROBE_FAILED',
+    ))
+    const refused = await send('POST', WORKSPACE_API.sshWorkspaces, { title: 'sandboxed', alias: 'host', remoteRoot: '/srv/sandboxed' })
+    expect(refused.status).toBe(400)
+    expect(JSON.parse(refused.text)).toMatchObject({ code: 'REMOTE_SANDBOX_PROBE_FAILED' })
+
+    const listed = await get(WORKSPACE_API.sshWorkspaces)
+    const workspaces = (JSON.parse(listed.text) as { workspaces: Array<{ remoteRoot: string }> }).workspaces
+    expect(workspaces.some(workspace => workspace.remoteRoot === '/srv/sandboxed')).toBe(false)
+  })
+
+  it('provisions before registering a valid workspace', async () => {
+    sandboxEnsure.mockResolvedValueOnce({ alias: 'host', enforcement: 'partial' } as never)
+    const created = await send('POST', WORKSPACE_API.sshWorkspaces, { title: 'provisioned', alias: 'host', remoteRoot: '/srv/provisioned' })
+    expect(created.status).toBe(200)
+    expect(sandboxEnsure).toHaveBeenCalledWith('host')
   })
 })

@@ -10,8 +10,7 @@
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
     "test:all": "pnpm -r test:all",
-    "test:vault": "pnpm -r test:vault",
-    "pack": "pnpm -r pack"
+    "test:vault": "pnpm -r test:vault"
   },
   "devDependencies": {
     "lightningcss": "^1.32.0"

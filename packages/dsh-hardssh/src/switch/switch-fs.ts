@@ -364,11 +364,16 @@ export class SwitchFileSystem extends FileSystem {
   ): Promise<FsWriteOutcome> {
     const decoded = this.decode(String(target.targetKey))
     if (decoded === undefined) throw new Error('fs-ssh: cannot route target')
-    // A per-call escalation policy is a LOCAL sandbox concept: the remote
-    // backend takes no policy parameter (its writes are bounded by the
-    // workspace root, not by the client sandbox). Drop it explicitly for
-    // remote worlds so the intent is documented rather than silently ignored.
-    const policy = decoded.world.namespace === '' ? sandboxPolicy : undefined
+    // The per-call policy is enforced by whoever owns the write. Local worlds
+    // hand it to the native sandboxed fs; a remote world hands the SAME policy
+    // to the remote backend, with the workspace root translated from the
+    // client anchor to the server root (the fence compares canonical REMOTE
+    // paths, so the anchor spelling would match nothing).
+    const policy = decoded.world.namespace === ''
+      ? sandboxPolicy
+      : sandboxPolicy === undefined || decoded.world.remoteRoot === undefined
+        ? undefined
+        : { ...sandboxPolicy, workspaceRoot: decoded.world.remoteRoot }
     return decoded.world.backend.writeText({ targetKey: decoded.rawKey as FsTarget['targetKey'], displayPath: target.displayPath }, content, expected, signal, policy)
   }
 
@@ -381,8 +386,12 @@ export class SwitchFileSystem extends FileSystem {
   ): Promise<FsEditOutcome> {
     const decoded = this.decode(String(target.targetKey))
     if (decoded === undefined) throw new Error('fs-ssh: cannot route target')
-    // Same local-only semantics as writeText above.
-    const policy = decoded.world.namespace === '' ? sandboxPolicy : undefined
+    // Same policy translation as writeText above.
+    const policy = decoded.world.namespace === ''
+      ? sandboxPolicy
+      : sandboxPolicy === undefined || decoded.world.remoteRoot === undefined
+        ? undefined
+        : { ...sandboxPolicy, workspaceRoot: decoded.world.remoteRoot }
     return decoded.world.backend.editText({ targetKey: decoded.rawKey as FsTarget['targetKey'], displayPath: target.displayPath }, edit, expected, signal, policy)
   }
 }

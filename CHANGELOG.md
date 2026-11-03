@@ -4,6 +4,17 @@
 
 ## 未发布
 
+### 新功能：SSH 工作区的权限语义在远端生效（自部署 Landlock 沙箱）
+
+- 根因：`bash` 工具在 SSH 会话里经由 base 的 `bash-sandbox` → `ctx.subprocess` 执行，而 `ctx.subprocess` 已被插件的路由 facade 替换，于是**本地** bwrap 包装被原样送到远端执行（远端没有 bwrap，`env: 'bwrap': No such file or directory`，exit 127），SSH 会话的 bash 完全不可用；同时远端 `write`/`edit` 在 switch-fs 里显式丢弃了 per-call sandbox policy，`read-only` 会话仍能写远端文件。
+- 新增 `hardssh-shell` 行替换 base 的 `bash-sandbox`：本地世界用本执行器注入的 `ctx.sandbox.confine(...)` 包装命令再交给继承的本地执行机制（沙箱语义与 native 一致），SSH 世界改走自部署的 Landlock launcher；`read-only` / `workspace-write` 分别映射到 launcher 的只读/可写 grant，`danger-full-access` 不包装（与原生一致）。
+- 本地分支的第一版曾在 `ctx.isolate('shell')` 子 context 里手动构造 native 执行器，Cordis 不为其解析 `inject`，所有本地 bash 报 `cannot get property "sandbox" without inject`；现已改为直接用本行已注入的 sandbox provider，并新增 `tests/sandbox/shell-executor.test.ts`：用真实 Cordis Context + stub provider 挂载该行，覆盖本地/远端两条路径（该测试在旧实现上会失败）。
+- 新增远端沙箱部署与探测（`src/sandbox/`）：静态 `landlock-run`（DSH `node-addon-system` 的 MIT 二进制，x86_64 + aarch64，见 `assets/sandbox/`）上传到远端 `~/.dsh-hardssh/sandbox/runner-<sha>/`，按哈希复用；先跑 `--probe` 验证内核真的 enforce，再做一次“只读 profile 必须拒绝 `$HOME` 写入”的 smoke；失败一律 fail closed，不做无约束降级。
+- 创建工作区增加前置校验：非 Linux、非 x86_64/aarch64、内核没有 Landlock（Linux < 5.13）、上传/探测失败都会直接拒绝创建（400/502 + 机器码），不产生半成品工作区。
+- 远端 `write`/`edit` 增加 trusted-code 路径围栏（与原生 `fs-sandbox` 同语义）：`read-only` 拒绝全部写入，`workspace-write` 要求 canonical 远端路径落在远端工作区根或 `/tmp` 内，`danger-full-access` 放行；显式远端 `workdir` 由命令内部 `cd` 进入，spawn cwd 保持锚点以保证 subprocess facade 路由。
+- 移除 npm 发布元数据（`files`/`repository`/`homepage`/`bugs`/`keywords`/`pack`，包声明 `private: true`），README 安装路径改为 profile `link:` 源码 + `dsh.profile.bundles`。
+- 测试：新增 launcher/围栏/provisioner/创建前置校验/真实 Context 执行器用例（含“内核不 enforce”“只读 smoke 漏写”“上传失败”“本地 sandbox 注入”分支），以及需要 `DSH_LIVE_SSH=1` 的 live 用例；默认套件 770 通过、1 跳过。验收：测试服务（trial web）中分别在本地 `/home/jerry/tmp` 与 SSH 工作区 tmp 会话执行「当前是什么系统」，本地会话 bash 返回本机 WSL 主机信息，远端会话 bash 经 Landlock 返回 aliyun 主机信息，两条执行流均成功。
+
 ### 清理：移除英文 README 与兼容性矩阵
 
 - 删除 `README.en.md`，主 README 不再有语言切换入口。
