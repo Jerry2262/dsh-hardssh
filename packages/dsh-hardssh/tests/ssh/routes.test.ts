@@ -664,6 +664,29 @@ describe('terminal upgrade', () => {
 })
 
 describe('upload size limit (B-13)', () => {
+  it('delivers the 413 JSON to an ordinary fetch upload (the web UI path)', async () => {
+    // The UI uploads a File/ArrayBuffer through fetch; the route must report
+    // the declared-size rejection as a readable 413 body, not a reset. Measured
+    // against the raw socket below: fetch gets the reply deterministically.
+    const limitedStub = new StubEngine()
+    const limited = await startRouteServer({ engine: engine(limitedStub), uploadLimitBytes: 64 })
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const response = await fetch(
+          `http://127.0.0.1:${limited.port}${SSH_API.upload}?alias=web-01&remotePath=/tmp/x.bin`,
+          { method: 'POST', body: new Uint8Array(1 << 20) },
+        )
+        expect(response.status).toBe(413)
+        expect(await response.json()).toEqual({ error: 'upload body too large' })
+      }
+      // The declared-oversize path must not stage or transfer anything.
+      expect(limitedStub.uploadBytes).toBe(0)
+    } finally {
+      await limited.routes.dispose()
+      await closeServer(limited.server)
+    }
+  })
+
   it('rejects a DECLARED oversize Content-Length from the header alone (413 + connection close)', async () => {
     const limitedStub = new StubEngine()
     const limited = await startRouteServer({ engine: engine(limitedStub), uploadLimitBytes: 64 })
