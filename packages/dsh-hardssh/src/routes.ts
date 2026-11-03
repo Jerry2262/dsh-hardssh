@@ -164,6 +164,12 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
     return true
   }
 
+  /** SFTP status 2 (SSH_FX_NO_SUCH_FILE) / ENOENT both mean "no such path". */
+  function isRemotePathMissing(error: unknown): boolean {
+    const code = (error as { code?: unknown } | null)?.code
+    return code === 2 || code === 'ENOENT' || code === 'NO_SUCH_FILE'
+  }
+
   /** List the available SSH hosts (for the picker). */
   const hostsRoute: WebRoute = {
     kind: 'exact',
@@ -218,20 +224,55 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
           writeJson(res, 400, { error: `remoteRoot must be an absolute remote path (got '${remoteRoot}')` })
           return
         }
+        // Native workspace creation runs `realpath()` on the directory, so the
+        // registered record holds the canonical path, dedupe compares
+        // canonical paths, and a missing directory fails. The remote
+        // equivalent is one protocol-level SFTP realpath on the pooled
+        // connection (the picker just listed this tree, so it is live); the
+        // canonical path is what the record stores and what dedupe keys on.
+        let canonicalRoot: string
         try {
-          const record = await workspaces.create({ title, alias, remoteRoot })
+          const [canonical] = await engine.realpaths(alias, [remoteRoot])
+          canonicalRoot = canonical ?? remoteRoot
+          // Native create also rejects a path that is not a directory.
+          const target = await engine.stat(alias, canonicalRoot)
+          if (target.type !== 'dir') {
+            writeJson(res, 400, { error: `remote path is not a directory: '${remoteRoot}'` })
+            return
+          }
+        } catch (error) {
+          // An absent directory is an invalid target (400, like the local
+          // picker refusing a missing folder); a transport failure keeps the
+          // usual 502 so the caller can retry once the host is reachable.
+          if (isRemotePathMissing(error)) {
+            writeJson(res, 400, { error: `remote directory does not exist: '${remoteRoot}'` })
+            return
+          }
+          writeRouteError(res, error, 502)
+          return
+        }
+        try {
+          const { record, created } = await workspaces.create({ title, alias, remoteRoot: canonicalRoot })
           // Make the anchor a REAL host workspace so it appears in the
           // sidebar and can host sessions (the seams route it remote by its
           // anchor path). The two stores have no shared transaction, so a
-          // registration failure is COMPENSATED by deleting the record just
-          // created: returning 200 here would leave a binding the sidebar
-          // cannot reach, and returning 5xx while keeping the record would
-          // make a retry create a duplicate.
+          // registration failure is COMPENSATED by deleting the record THIS
+          // request created: returning 200 here would leave a binding the
+          // sidebar cannot reach, and returning 5xx while keeping the record
+          // would make a retry create a duplicate. A reused record (dedupe
+          // hit) predates this request and must never be rolled back.
           if (deps.registerHostWorkspace !== undefined) {
             try {
               await deps.registerHostWorkspace(record.anchorPath, record.title)
             } catch (error) {
               const registration = error instanceof Error ? error.message : String(error)
+              if (!created) {
+                writeJson(res, 502, {
+                  error: `host workspace registration failed for reused workspace '${record.title}': ${registration}`,
+                  code: 'HOST_REGISTRATION_FAILED',
+                })
+                return
+              }
               try {
                 await workspaces.remove(record.id)
               } catch (rollbackError) {
@@ -381,6 +422,49 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
     },
   }
 
+  /** Create one remote directory for the workspace picker's "New folder".
+   *  Body: alias + path (the listed level) + name (one child segment). */
+  const mkdirRoute: WebRoute = {
+    kind: 'exact',
+    path: WORKSPACE_API.sshWorkspaceMkdir,
+    handler: async (req, res) => {
+      if (!guard(req, res, 'POST')) return
+      let body: Record<string, unknown>
+      try {
+        body = await readJsonBody(req)
+      } catch (error) {
+        writeRouteError(res, error, 500)
+        return
+      }
+      const alias = typeof body.alias === 'string' ? body.alias.trim() : ''
+      const parent = typeof body.path === 'string' ? body.path.trim() : ''
+      const name = typeof body.name === 'string' ? body.name.trim() : ''
+      if (alias === '' || parent === '' || name === '') {
+        writeJson(res, 400, { error: 'alias, path and name are required' })
+        return
+      }
+      if (hosts.find(alias) === undefined) {
+        writeJson(res, 404, { error: `alias '${alias}' not found` })
+        return
+      }
+      if (!parent.startsWith('/') || parent.includes('\0')) {
+        writeJson(res, 400, { error: `path must be an absolute POSIX path (got '${parent}')` })
+        return
+      }
+      if (name.includes('/') || name.includes('\0') || name === '.' || name === '..') {
+        writeJson(res, 400, { error: `invalid directory name (got '${name}')` })
+        return
+      }
+      try {
+        const abs = posix.join(posix.normalize(parent), name)
+        await engine.mkdir(alias, abs)
+        writeJson(res, 201, { path: abs })
+      } catch (error) {
+        writeRouteError(res, error, 502)
+      }
+    },
+  }
+
   /**
    * Replay host-workspace registration for every stored record. Registration
    * happens only on create/delete, so a process restart (or a registration
@@ -412,5 +496,5 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
     },
   }
 
-  return [hostsRoute, wsRoute, itemRoute, dirRoute, reconcileRoute]
+  return [hostsRoute, wsRoute, itemRoute, dirRoute, mkdirRoute, reconcileRoute]
 }

@@ -73,4 +73,14 @@ export class WorkspaceApi {
     const body = await readJson<{ path: string; entries: RemoteDirEntry[] }>(response)
     return body
   }
+
+  /** Create one child directory on the remote host (workspace picker). */
+  async createRemoteDir(alias: string, path: string, name: string): Promise<{ path: string }> {
+    const response = await fetch(WORKSPACE_API.sshWorkspaceMkdir, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ alias, path, name }),
+    })
+    return await readJson<{ path: string }>(response)
+  }
 }

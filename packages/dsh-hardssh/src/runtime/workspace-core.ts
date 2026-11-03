@@ -12,6 +12,7 @@ import { randomUUID } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import type { LedgerListener, WorkspaceLedger as WorkspaceLedgerType } from '../base/ledger.ts'
+import { dshHomePath } from '../dsh-home.ts'
 import { WorkspaceLedger } from '../base/ledger.ts'
 import { LedgerWorkspaceRouter } from '../base/ledger-router.ts'
 import type {
@@ -202,12 +203,12 @@ export class DefaultWorkspaceCore implements WorkspaceCore {
 
 /** Persistence path for the generic ledger (~/.dsh/workspaces/index.v1.json). */
 export function genericLedgerPath(): string {
-  return join(homedir(), '.dsh', 'workspaces', 'index.v1.json')
+  return dshHomePath('workspaces', 'index.v1.json')
 }
 
 /** Anchor root for managed generic workspaces (~/.dsh/workspaces/anchors). */
 export function genericAnchorRoot(): string {
-  return join(homedir(), '.dsh', 'workspaces', 'anchors')
+  return dshHomePath('workspaces', 'anchors')
 }
 
 /** mountWorkspaceCore() cannot register Cordis services or builtin providers, so it performs host assembly (provider registration + `ctx.provide('workspaceCore')`); the boot calls `initialize()` afterwards. */

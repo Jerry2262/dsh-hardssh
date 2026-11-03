@@ -13,13 +13,13 @@
  * @module dsh-hardssh/ledger
  */
 
-import { homedir } from 'node:os'
 import { join, posix } from 'node:path'
+import { dshHomePath } from './dsh-home.ts'
 
 /** The frozen legacy SSH ledger location: ~/.dsh/dsh-hardssh-workspaces.json.
  *  Only read once by the startup import when no cutover marker exists. */
 export function ledgerPath(): string {
-  return join(homedir(), '.dsh', 'dsh-hardssh-workspaces.json')
+  return dshHomePath('dsh-hardssh-workspaces.json')
 }
 
 /**
@@ -40,7 +40,7 @@ export function normalizeRemoteRoot(raw: string): string {
 /** Anchor roots: ~/.dsh/ssh-workspaces/<id>/ — visible in the sidebar as
  *  ordinary host workspaces (and thus selectable for sessions). */
 export function anchorRoot(): string {
-  return join(homedir(), '.dsh', 'ssh-workspaces')
+  return dshHomePath('ssh-workspaces')
 }
 
 /** The anchor directory for one id. */

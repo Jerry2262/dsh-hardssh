@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { dshHomePath } from '../dsh-home.ts'
 import type { HostPayload, ImportResult, SshAuthKind, SshHostEntry, SshHostSummary } from './protocol.ts'
 import { validateCommandPolicy } from './command-policy.ts'
 import { readSshConfig, sshConfigPath } from './ssh-config.ts'
@@ -18,7 +19,7 @@ const FORMAT_VERSION = 1
 
 /** Store file location: <home>/.dsh/dsh-ssh.json. */
 export function storePath(): string {
-  return join(homedir(), '.dsh', 'dsh-ssh.json')
+  return dshHomePath('dsh-ssh.json')
 }
 
 /** The user's standard OpenSSH config path — owned by the ssh-config reader so

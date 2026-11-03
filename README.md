@@ -91,7 +91,7 @@ WorkspaceRecord / WorkspaceProvider / WorkspaceConnection / 能力(capability)
 
 ## 特性
 
-- **SSH 工作区**：任意 `user@host` 的目录即可成为工作区。绑定的会话透明远端路由；侧边栏工作区带服务器标识（已连接 / 未连接，悬停显示远端目录）。
+- **SSH 工作区**：任意 `user@host` 的目录即可成为工作区。绑定的会话透明远端路由；侧边栏工作区带服务器标识（已连接 / 未连接，悬停显示远端目录）。创建时校验远端目录存在、按远端真实路径（canonical）存储并去重，同一服务器上的同一目录（含软链拼写）只会有一个工作区（与本地工作区一致：重复「打开」复用已有记录，不会新增侧边栏条目）。
 - **SSH 运维（跟随会话）**：Web 终端（xterm + WebSocket PTY）、SFTP 上传下载、本地端口转发（访问内网数据库/服务）、当前服务器的远端命令。
 - **主机管理**：左侧「SSH 工作区」面板按服务器分组列出全部主机与工作区，带已连接 / 未连接徽章，支持增删改查；`~/.ssh/config` 会被**实时读取**（`Host` / `HostName` / `Port` / `User` / `IdentityFile` / `ProxyJump`），**无需导入**，插件从不改写该文件（同名主机以插件存储的编辑为准）。
 - **密钥优先认证**：连接顺序固定为 **key → agent → password**。显式 `IdentityFile` 优先，其次自动尝试 `~/.ssh/id_ed25519` / `id_ecdsa` / `id_rsa` / `id_dsa`，再走 agent（`SSH_AUTH_SOCK`，Windows 上还支持 OpenSSH 的命名管道 `\\.\pipe\openssh-ssh-agent`），以上都不可用时才询问密码——**有可用 key 就不会弹密码**。

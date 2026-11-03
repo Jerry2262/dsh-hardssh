@@ -36,6 +36,7 @@
     "src/utf8.ts",
     "src/subprocess-environment.ts",
     "src/ledger.ts",
+    "src/dsh-home.ts",
     "src/backend.ts",
     "src/shell.ts",
     "src/host-http.ts",

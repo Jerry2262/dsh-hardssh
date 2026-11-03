@@ -24,8 +24,7 @@ import { NS, dictionaries, type WorkspaceKey } from './locales.ts'
 import { WorkspaceManager } from './state.ts'
 import { setLanguage, tt } from './text.ts'
 import { registerWorkspacePanel } from './workspace-panel-entry.tsx'
-import { migrateLegacySessionMemory } from './migrate.ts'
-import { DirectoryFlow } from './directory-flow.tsx'
+import { DirectoryFlow, type NativeDirectoryFlowHandle } from './directory-flow.tsx'
 import { connectHost, subscribeConnectState } from './connect-host.ts'
 import { mountWorkspaceBadges } from './workspace-badges.ts'
 import { mountWorkspaceFilesPathRemap } from './workspace-files-path.ts'
@@ -50,33 +49,99 @@ export type { ClusterTabProps } from './ssh/panel/ClusterTab.tsx'
 export type { SshKey } from './ssh/locales.ts'
 
 /** Required services: slots for the extension seats, locale for copy,
- *  workspaces for the native local-directory chooser, sessions for the
- *  open/new-session connection gate, and sidebarRightTabs for the SSH
- *  operations console type. Keep the registry explicit: without it Cordis may
- *  activate this client before ui-sidebar-right provides the service; the
- *  guarded registration then degrades silently and no HardSSH tab exists. */
+ *  sessions for the open/new-session connection gate, and sidebarRightTabs
+ *  for the SSH operations console type. Keep the registry explicit: without
+ *  it Cordis may activate this client before a provider offers the service;
+ *  the guarded registration then degrades silently and no HardSSH surface
+ *  exists. */
 export const inject = ['slots', 'locale', 'sessions', 'sidebarRightTabs']
 
+/** The kernel's directory-flow registrations, as the slot ledger exposes them. */
+interface LedgerEntry {
+  component: unknown
+  inject?: () => Record<string, unknown>
+}
+
 /**
- * Resolve the kernel's directory-picker service.
+ * Read the kernel's own directory-flow occupant registered on one hole.
  *
- * The 0.1.5 kernel line renamed it: the old `ctx.workspaces.pickDirectory()`
- * no longer exists (the service is now `ctx.uiWorkspace`, constructed in
- * `dsh-client-ui-workspace` as `new UiWorkspaceService(ctx, ctx.remote.directoryPicker, …)`).
- * Calling the stale name threw a synchronous TypeError inside the click
- * handler, which the browser swallowed — the flow then sat in its
- * `picking-local` state and rendered an EMPTY dropdown (the "narrow white box"
- * users saw). Resolve both names lazily and report a usable error when neither
- * exposes the picker, so the failure is visible instead of silent.
+ * The registry keeps every registration, including the one our own occupant
+ * shadows: `entries` is the ledger view, not the render winners. Our entry is
+ * the one carrying this module's `DirectoryFlow` component, so the first
+ * other entry is the composed kernel surface (native chooser or in-app
+ * browser), reused verbatim.
+ * @param ctx - client root context carrying the slot registry.
+ * @param hole - directory-flow hole name.
+ * @returns the reusable handle, or undefined when no kernel occupant exists.
  */
-function resolveDirectoryPicker(ctx: ClientContext): { pickDirectory: () => Promise<string> } | undefined {
-  for (const name of ['uiWorkspace', 'workspaces']) {
-    const service = (ctx.get as (key: string) => unknown)(name) as { pickDirectory?: unknown } | undefined
-    if (service !== undefined && typeof service.pickDirectory === 'function') {
-      return service as { pickDirectory: () => Promise<string> }
-    }
+function readNativeDirectoryFlow(
+  ctx: ClientContext,
+  hole: 'conversation.hero.workspace.directoryFlow' | 'sidebar.workspaces.directoryFlow',
+): NativeDirectoryFlowHandle | undefined {
+  let entries: readonly unknown[] = []
+  try {
+    entries = ctx.slots.entries(hole) as readonly unknown[]
+  } catch {
+    return undefined
   }
-  return undefined
+  const native = (entries as readonly LedgerEntry[]).find((entry) => entry.component !== DirectoryFlow)
+  if (native === undefined) return undefined
+  if (typeof native.component !== 'function') return undefined
+  let injected: Record<string, unknown> = {}
+  try {
+    injected = typeof native.inject === 'function' ? native.inject() : {}
+  } catch {
+    return undefined
+  }
+  return { component: native.component as NativeDirectoryFlowHandle['component'], injected }
+}
+
+/**
+ * Mount the directory-flow occupant on both `single` seats.
+ *
+ * Mirror the native picker's registration shape exactly: nested
+ * `inject(hero) -> inject(sidebar) -> generator`, so the declarations are
+ * re-checked each activation and our occupant lands once ui-workspace is
+ * live. A negative priority beats the kernel occupant (priority 0) under the
+ * single-slot "lowest wins" rule; the local branch then renders that kernel
+ * occupant by reference.
+ */
+function registerDirectoryFlow(ctx: ClientContext, deps: { api: WorkspaceApi; sshApi: SshApi }): void {
+  const flowInject = (
+    hole: 'conversation.hero.workspace.directoryFlow' | 'sidebar.workspaces.directoryFlow',
+  ): (() => Record<string, unknown>) => () => ({
+    resolveLocalFlow: () => readNativeDirectoryFlow(ctx, hole),
+    createSshWorkspace: (input: { title: string; alias: string; remoteRoot: string }) => deps.api.createWorkspace(input),
+    listHosts: () => deps.sshApi.listHosts(),
+    createHost: (input: {
+      alias: string
+      host: string
+      port?: number
+      user: string
+      auth: { kind: 'password'; password: string } | { kind: 'key'; keyPath: string; passphrase?: string }
+    }) => deps.sshApi.createHost(input),
+    listRemoteDir: (alias: string, path?: string) => deps.api.listRemoteDir(alias, path),
+    createRemoteDir: (alias: string, path: string, name: string) => deps.api.createRemoteDir(alias, path, name),
+    ensureConnected: (alias: string) => connectHost(deps.sshApi, alias),
+  })
+  ctx.slots.inject('conversation.hero.workspace.directoryFlow', () => ctx.slots.inject('sidebar.workspaces.directoryFlow', function* () {
+    yield (ctx.slots.register as unknown as (options: {
+      name: 'conversation.hero.workspace.directoryFlow'
+      priority?: number
+      inject: () => Record<string, unknown>
+    }, component: unknown) => () => void)(
+      { name: 'conversation.hero.workspace.directoryFlow', priority: -1, inject: flowInject('conversation.hero.workspace.directoryFlow') },
+      DirectoryFlow,
+    )
+    yield (ctx.slots.register as unknown as (options: {
+      name: 'sidebar.workspaces.directoryFlow'
+      priority?: number
+      inject: () => Record<string, unknown>
+    }, component: unknown) => () => void)(
+      { name: 'sidebar.workspaces.directoryFlow', priority: -1, inject: flowInject('sidebar.workspaces.directoryFlow') },
+      DirectoryFlow,
+    )
+  }))
 }
 
 /** Apply the browser half. */
@@ -122,52 +187,7 @@ export function apply(ctx: ClientContext): void {
     // center column, and selecting the Conversation row switches back.
     registerWorkspacePanel(ctx, { manager, sshApi })
 
-    // Replace the native-only directory-flow occupant (both holes) with the
-    // SSH/local chooser. `pickDirectory` restores the original native local
-    // picking for the "Local workspace" branch; the SSH branch drives our own
-    // creation dialog and hands the anchor dir to the owner.
-    //
-    // Mirror the native picker's registration shape exactly: nested
-    // `inject(hero) -> inject(sidebar) -> generator`, so the declarations are
-    // re-checked each activation and our occupant lands once ui-workspace is
-    // live. A negative priority beats the native occupant (priority 0) under
-    // the single-slot "lowest wins" rule.
-    const flowInject = (): Record<string, unknown> => ({
-      pickDirectory: async () => {
-        const picker = resolveDirectoryPicker(ctx)
-        if (picker === undefined) throw new Error(tt('flow.noPicker'))
-        return await picker.pickDirectory()
-      },
-      createSshWorkspace: (input: { title: string; alias: string; remoteRoot: string }) => api.createWorkspace(input),
-      listHosts: () => sshApi.listHosts(),
-      createHost: (input: {
-        alias: string
-        host: string
-        port?: number
-        user: string
-        auth: { kind: 'password'; password: string } | { kind: 'key'; keyPath: string; passphrase?: string }
-      }) => sshApi.createHost(input),
-      listRemoteDir: (alias: string, path?: string) => api.listRemoteDir(alias, path),
-      ensureConnected: (alias: string) => connectHost(sshApi, alias),
-    })
-    ctx.slots.inject('conversation.hero.workspace.directoryFlow', () => ctx.slots.inject('sidebar.workspaces.directoryFlow', function* () {
-      yield (ctx.slots.register as unknown as (options: {
-        name: 'conversation.hero.workspace.directoryFlow'
-        priority?: number
-        inject: () => Record<string, unknown>
-      }, component: unknown) => () => void)(
-        { name: 'conversation.hero.workspace.directoryFlow', priority: -1, inject: flowInject },
-        DirectoryFlow,
-      )
-      yield (ctx.slots.register as unknown as (options: {
-        name: 'sidebar.workspaces.directoryFlow'
-        priority?: number
-        inject: () => Record<string, unknown>
-      }, component: unknown) => () => void)(
-        { name: 'sidebar.workspaces.directoryFlow', priority: -1, inject: flowInject },
-        DirectoryFlow,
-      )
-    }))
+    registerDirectoryFlow(ctx, { api, sshApi })
 
     manager.start()
 
@@ -247,14 +267,6 @@ export function apply(ctx: ClientContext): void {
   } catch (error) {
     console.warn('[dsh-hardssh] mount failed:', error)
   }
-
-  // One-time migration: the old build tracked a per-session GLOBAL local⇄remote
-  // mode in localStorage (`ssh-session-state:<id>`). Convert every remembered
-  // remote target into a real SSH-bound workspace record, then forget the
-  // legacy state. Runs async and best-effort; a failure only logs.
-  void migrateLegacySessionMemory(api).catch((error: unknown) => {
-    console.warn('[dsh-hardssh] legacy migration skipped:', error)
-  })
 
   // Language mirroring (the shell owns <html lang>; the dictionary follows).
   const syncLanguage = (): void => {

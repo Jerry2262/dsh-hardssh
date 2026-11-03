@@ -56,8 +56,9 @@ export interface WorkspaceStoreView {
   findByAnchor(path: string): Promise<SshWorkspaceRecord | undefined>
   /** Synchronous anchor lookup used by the session announcement. */
   findByAnchorSync(path: string): SshWorkspaceRecord | undefined
-  /** Create an SSH workspace (title/alias/remoteRoot); the anchor is managed by the store. */
-  create(input: { title: string; alias: string; remoteRoot: string }): Promise<SshWorkspaceRecord>
+  /** Create (or reuse, for an already bound remote target) an SSH workspace;
+   *  `created` tells the caller whether a NEW record/anchor was added. */
+  create(input: { title: string; alias: string; remoteRoot: string }): Promise<{ record: SshWorkspaceRecord; created: boolean }>
   rename(id: string, title: string): Promise<SshWorkspaceRecord | undefined>
   remove(id: string): Promise<boolean>
   /** The shared anchor root (fail-closed gating before the runtime is ready). */
@@ -188,6 +189,30 @@ function normalizeRemoteRoot(root: string): string {
 
 
 /**
+ * Find the SSH record already bound to one remote target.
+ *
+ * The record's provider reference carries the host alias (`id`, with `alias`
+ * kept equal for display); the location root is stored normalized, but legacy
+ * migrated rows are re-normalized defensively so one target cannot split into
+ * two records across spellings.
+ */
+function findByRemoteTarget(records: ReadonlyArray<WorkspaceRecord>, alias: string, root: string): WorkspaceRecord | undefined {
+  for (const record of records) {
+    if (record.provider.id !== 'ssh') continue
+    const reference = record.provider.connectionRef
+    if ((reference?.id ?? reference?.alias) !== alias) continue
+    let recordRoot: string
+    try {
+      recordRoot = normalizeSshRemoteRoot(record.location.root)
+    } catch {
+      continue
+    }
+    if (recordRoot === root) return record
+  }
+  return undefined
+}
+
+/**
  * The single record source: projects the generic `WorkspaceLedger` (via
  * `WorkspaceCore`) into the client SSH DTO and performs workspace CRUD through
  * the generic core. Routes, agent tools, and the SSH host-delete guard stay
@@ -241,10 +266,35 @@ export class GenericWorkspaceStore implements WorkspaceStoreView {
     return undefined
   }
 
-  /** WorkspaceLedger.create() cannot generate SSH defaults or the SSH anchor layout, so this maps the SSH create input into a generic record first. */
-  async create(input: { title: string; alias: string; remoteRoot: string }): Promise<SshWorkspaceRecord> {
+  /** Serializes SSH creates so the duplicate lookup and the record write
+   *  cannot interleave (the native registry does the same inside its mutation
+   *  queue). */
+  private createQueue: Promise<unknown> = Promise.resolve()
+
+  /**
+   * The native `WorkspaceRegistry.create` reuses the existing workspace when
+   * its canonical directory is already registered, keeping the original title
+   * and identity; only a not-yet-registered directory gets a new record.
+   *
+   * The remote equivalent keys on the SSH target, not the local anchor: every
+   * SSH workspace has a fresh managed anchor, so the kernel cannot dedupe them
+   * and a second "Open" on the same remote directory would otherwise add a
+   * second sidebar entry. Same (alias, normalized remote root) therefore
+   * returns the existing record; the same path on a different server stays a
+   * distinct workspace.
+   */
+  async create(input: { title: string; alias: string; remoteRoot: string }): Promise<{ record: SshWorkspaceRecord; created: boolean }> {
+    const run = this.createQueue.then(() => this.createExclusive(input))
+    this.createQueue = run.then(() => undefined, () => undefined)
+    return run
+  }
+
+  /** Serialized half of {@link create}. */
+  private async createExclusive(input: { title: string; alias: string; remoteRoot: string }): Promise<{ record: SshWorkspaceRecord; created: boolean }> {
     await this.ready
     const root = normalizeSshRemoteRoot(input.remoteRoot)
+    const existing = findByRemoteTarget(await this.core.list(), input.alias, root)
+    if (existing !== undefined) return { record: toSshWorkspaceDto(existing), created: false }
     // Anchor under the SSH anchor base (not the generic anchor root): ids and
     // anchors must stay stable for sidebar/session binding.
     const id = randomUUID()
@@ -256,7 +306,7 @@ export class GenericWorkspaceStore implements WorkspaceStoreView {
       location: { kind: 'posix', root },
       anchor: { path: join(this.anchorBase, id), mode: 'managed' },
     })
-    return toSshWorkspaceDto(record)
+    return { record: toSshWorkspaceDto(record), created: true }
   }
 
   /** Title edits route through the generic update (the generic ledger has no SSH-specific rename). */

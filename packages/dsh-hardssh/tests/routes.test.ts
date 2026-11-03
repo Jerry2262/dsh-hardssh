@@ -31,8 +31,8 @@ const dir = mkdtempSync(join(tmpdir(), 'dsh-hardssh-generic-routes-'))
 const hosts = {
   path: join(dir, 'hosts.json'),
   list: () => [],
-  find: (alias: string) => alias === 'host'
-    ? { alias: 'host', host: 'example.test', port: 22, user: 'u', auth: 'key' as const, description: 'test', tags: [], environment: undefined }
+  find: (alias: string) => alias === 'host' || alias === 'host2'
+    ? { alias, host: `${alias}.example.test`, port: 22, user: 'u', auth: 'key' as const, description: 'test', tags: [], environment: undefined }
     : undefined,
   summarize: (entry: unknown) => entry as never,
 }
@@ -87,7 +87,10 @@ beforeAll(async () => {
 
   const workspaceRoutes = makeWorkspaceRoutes({
     hosts,
-    engine: {} as never,
+    engine: {
+      realpaths: async (_alias: string, paths: readonly string[]) => [...paths],
+      stat: async () => ({ type: 'dir', size: 0, mtimeMs: 0, mode: 0o755 }),
+    } as never,
     workspaces: store,
     registerHostWorkspace: async () => undefined,
     unregisterHostWorkspace: async () => undefined,
@@ -170,6 +173,174 @@ describe('generic workspace CRUD over the /api/dsh-hardssh surface', () => {
   })
 })
 
+describe('SSH workspace create reuses the same remote target (native create semantics)', () => {
+  it('returns the existing record for the same alias + normalized remote root', async () => {
+    const first = await send('POST', WORKSPACE_API.sshWorkspaces, { title: 'tmp', alias: 'host', remoteRoot: '/home/u/tmp' })
+    expect(first.status).toBe(200)
+    const existing = (JSON.parse(first.text) as { workspace: { id: string; anchorPath: string } }).workspace
+
+    // Opening the same directory again (different trailing slash, . segment
+    // and proposed title) must reuse the record, exactly like the native
+    // registry's canonical-path dedupe.
+    for (const remoteRoot of ['/home/u/tmp/', '/home/u/./tmp']) {
+      const again = await send('POST', WORKSPACE_API.sshWorkspaces, { title: 'another title', alias: 'host', remoteRoot })
+      expect(again.status).toBe(200)
+      const workspace = (JSON.parse(again.text) as { workspace: { id: string; anchorPath: string; title: string } }).workspace
+      expect(workspace.id).toBe(existing.id)
+      expect(workspace.anchorPath).toBe(existing.anchorPath)
+      expect(workspace.title).toBe('tmp')
+    }
+
+    // The same path on a different server is a different target.
+    const otherHost = await send('POST', WORKSPACE_API.sshWorkspaces, { title: 'tmp', alias: 'host2', remoteRoot: '/home/u/tmp' })
+    expect(otherHost.status).toBe(200)
+    const other = (JSON.parse(otherHost.text) as { workspace: { id: string } }).workspace
+    expect(other.id).not.toBe(existing.id)
+
+    // Concurrent opens coalesce to one record as well.
+    const [left, right] = await Promise.all([
+      send('POST', WORKSPACE_API.sshWorkspaces, { title: 'tmp', alias: 'host', remoteRoot: '/home/u/tmp' }),
+      send('POST', WORKSPACE_API.sshWorkspaces, { title: 'tmp', alias: 'host', remoteRoot: '/home/u/tmp' }),
+    ])
+    expect((JSON.parse(left.text) as { workspace: { id: string } }).workspace.id).toBe(existing.id)
+    expect((JSON.parse(right.text) as { workspace: { id: string } }).workspace.id).toBe(existing.id)
+
+    const listed = await get(WORKSPACE_API.sshWorkspaces)
+    const records = (JSON.parse(listed.text) as { workspaces: Array<{ id: string }> }).workspaces
+    expect(records).toHaveLength(2)
+
+    for (const record of records) {
+      const removed = await send('DELETE', `${WORKSPACE_API.sshWorkspaces}/item?id=${encodeURIComponent(record.id)}`)
+      expect(removed.status).toBe(200)
+    }
+  })
+})
+
+describe('SSH workspace create canonicalizes the remote directory (native realpath semantics)', () => {
+  it('stores the canonical path and dedupes different spellings of it', async () => {
+    const workspaces = await freshGenericStore()
+    const running = await startWorkspaceServer({ workspaces })
+    running.engine.realpaths.mockImplementation(async (_alias: string, paths: readonly string[]) =>
+      paths.map(path => path === '/srv/current' ? '/srv/releases/v2' : path))
+    try {
+      // The picker's requested spelling is the title source (native keeps the
+      // requested basename); the record itself must hold the canonical path.
+      const viaLink = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaces, { title: 'current', alias: 'host', remoteRoot: '/srv/current' })
+      expect(viaLink.status).toBe(200)
+      const first = (JSON.parse(viaLink.text) as { workspace: { id: string; remoteRoot: string; title: string } }).workspace
+      expect(first.remoteRoot).toBe('/srv/releases/v2')
+      expect(first.title).toBe('current')
+
+      const viaReal = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaces, { title: 'v2', alias: 'host', remoteRoot: '/srv/releases/v2' })
+      expect(viaReal.status).toBe(200)
+      const second = (JSON.parse(viaReal.text) as { workspace: { id: string } }).workspace
+      expect(second.id).toBe(first.id)
+      expect(running.engine.realpaths).toHaveBeenCalledTimes(2)
+    } finally {
+      await new Promise<void>((resolve) => { running.server.close(() => resolve()) })
+    }
+  })
+
+  it('rejects a missing directory and reports transport failures without creating a record', async () => {
+    const workspaces = await freshGenericStore()
+    const running = await startWorkspaceServer({ workspaces })
+    try {
+      running.engine.realpaths.mockImplementationOnce(async () => {
+        throw Object.assign(new Error('No such file'), { code: 2 })
+      })
+      const missing = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaces, { title: 'gone', alias: 'host', remoteRoot: '/srv/missing' })
+      expect(missing.status).toBe(400)
+      expect(missing.text).toContain('does not exist')
+
+      running.engine.realpaths.mockImplementationOnce(async () => {
+        throw Object.assign(new Error('connection lost'), { code: 'ECONNRESET' })
+      })
+      const transport = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaces, { title: 'later', alias: 'host', remoteRoot: '/srv/later' })
+      expect(transport.status).toBe(502)
+
+      // realpath resolves fine, but the target is a file: native create
+      // rejects a non-directory too.
+      running.engine.stat.mockResolvedValueOnce({ type: 'file', size: 3, mtimeMs: 0, mode: 0o644 })
+      const notDir = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaces, { title: 'file', alias: 'host', remoteRoot: '/srv/file.txt' })
+      expect(notDir.status).toBe(400)
+      expect(notDir.text).toContain('not a directory')
+
+      expect(await workspaces.list()).toHaveLength(0)
+    } finally {
+      await new Promise<void>((resolve) => { running.server.close(() => resolve()) })
+    }
+  })
+})
+
+describe('SSH workspace create must not roll back a reused record', () => {
+  it('keeps the pre-existing workspace when re-registration fails on a dedupe hit', async () => {
+    const workspaces = await freshGenericStore()
+    const register = vi.fn(async () => undefined)
+    const running = await startWorkspaceServer({ workspaces, registerHostWorkspace: register })
+    try {
+      const created = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaces, { title: 'app', alias: 'host', remoteRoot: '/srv/app' })
+      expect(created.status).toBe(200)
+      const record = (JSON.parse(created.text) as { workspace: { id: string } }).workspace
+
+      // The second create reuses the record, then its (idempotent)
+      // re-registration fails: the rollback compensation must NOT delete the
+      // workspace that existed before this request.
+      register.mockRejectedValueOnce(new Error('sidebar locked'))
+      const reused = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaces, { title: 'app', alias: 'host', remoteRoot: '/srv/app' })
+      expect(reused.status).toBe(502)
+      expect(reused.text).toContain('registration failed')
+
+      expect(await workspaces.get(record.id)).toBeDefined()
+      expect(await workspaces.list()).toHaveLength(1)
+    } finally {
+      await new Promise<void>((resolve) => { running.server.close(() => resolve()) })
+    }
+  })
+})
+
+describe('remote mkdir route (workspace picker "New folder")', () => {
+  it('creates one child directory under an absolute POSIX parent', async () => {
+    const workspaces = await freshGenericStore()
+    const running = await startWorkspaceServer({ workspaces })
+    try {
+      const response = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaceMkdir, { alias: 'host', path: '/home/u', name: 'new' })
+      expect(response.status).toBe(201)
+      expect(JSON.parse(response.text)).toEqual({ path: '/home/u/new' })
+      expect(running.engine.mkdir).toHaveBeenCalledWith('host', '/home/u/new')
+    } finally {
+      await new Promise<void>((resolve) => { running.server.close(() => resolve()) })
+    }
+  })
+
+  it('normalizes a separator-terminated parent and keeps POSIX semantics', async () => {
+    const workspaces = await freshGenericStore()
+    const running = await startWorkspaceServer({ workspaces })
+    try {
+      const response = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaceMkdir, { alias: 'host', path: '/srv/', name: 'app' })
+      expect(response.status).toBe(201)
+      expect(JSON.parse(response.text)).toEqual({ path: '/srv/app' })
+    } finally {
+      await new Promise<void>((resolve) => { running.server.close(() => resolve()) })
+    }
+  })
+
+  it('rejects path traversals, unknown aliases and non-POST methods', async () => {
+    const workspaces = await freshGenericStore()
+    const running = await startWorkspaceServer({ workspaces })
+    try {
+      const traversal = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaceMkdir, { alias: 'host', path: '/home/u', name: '../etc' })
+      expect(traversal.status).toBe(400)
+      const unknown = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaceMkdir, { alias: 'nope', path: '/home/u', name: 'new' })
+      expect(unknown.status).toBe(404)
+      const wrongMethod = await sendTo(running.port, 'GET', WORKSPACE_API.sshWorkspaceMkdir)
+      expect(wrongMethod.status).toBe(405)
+      expect(running.engine.mkdir).not.toHaveBeenCalled()
+    } finally {
+      await new Promise<void>((resolve) => { running.server.close(() => resolve()) })
+    }
+  })
+})
+
 /** A fresh generic projection store (own files) for one test. */
 async function freshGenericStore(): Promise<GenericWorkspaceStore> {
   const root = mkdtempSync(join(tmpdir(), 'dsh-hardssh-a04-'))
@@ -192,8 +363,14 @@ async function startWorkspaceServer(options: {
   workspaces: GenericWorkspaceStore
   registerHostWorkspace?: (anchorPath: string, title: string) => Promise<void>
   unregisterHostWorkspace?: (anchorPath: string) => Promise<void>
-}): Promise<{ server: Server; port: number; engine: { exec: ReturnType<typeof vi.fn>; ls: ReturnType<typeof vi.fn> } }> {
-  const engine = { exec: vi.fn(), ls: vi.fn() }
+}): Promise<{ server: Server; port: number; engine: { exec: ReturnType<typeof vi.fn>; ls: ReturnType<typeof vi.fn>; mkdir: ReturnType<typeof vi.fn>; realpaths: ReturnType<typeof vi.fn> } }> {
+  const engine = {
+    exec: vi.fn(),
+    ls: vi.fn(),
+    mkdir: vi.fn(async () => undefined),
+    realpaths: vi.fn(async (_alias: string, paths: readonly string[]) => [...paths]),
+    stat: vi.fn(async () => ({ type: 'dir' as const, size: 0, mtimeMs: 0, mode: 0o755 })),
+  }
   const routes = makeWorkspaceRoutes({
     hosts,
     engine: engine as never,
@@ -360,8 +537,8 @@ describe('A-04: host-workspace registration is transactional (compensation + rec
 
   it('reconcile re-registers every record and reports per-record failures', async () => {
     const workspaces = await freshGenericStore()
-    const first = await workspaces.create({ title: 'one', alias: 'host', remoteRoot: '/srv/one' })
-    const second = await workspaces.create({ title: 'two', alias: 'host', remoteRoot: '/srv/two' })
+    const first = (await workspaces.create({ title: 'one', alias: 'host', remoteRoot: '/srv/one' })).record
+    const second = (await workspaces.create({ title: 'two', alias: 'host', remoteRoot: '/srv/two' })).record
     const seen: string[] = []
     const running = await startWorkspaceServer({
       workspaces,

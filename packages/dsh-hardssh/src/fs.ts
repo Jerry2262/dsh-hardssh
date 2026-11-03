@@ -26,6 +26,7 @@ import { WFS_NAMESPACE_MARKER, SwitchFileSystem, type WorkspaceWorld } from './s
 import type { WorkspaceCore } from './runtime/workspace-core.ts'
 import type { WorkspaceRecord } from './base/model.ts'
 import { bindHardsshHealthFeature } from './runtime/health.ts'
+import { dshHomePath } from './dsh-home.ts'
 
 /** Stable cordis plugin name. */
 export const name = 'hardssh-fs'
@@ -164,7 +165,7 @@ export function apply(ctx: Context): void {
 
   new SwitchFileSystem(ctx, {
     local: localFs,
-    localRoots: [join(homedir(), '.dsh'), join(homedir(), '.agents')],
+    localRoots: [dshHomePath(), join(homedir(), '.agents')],
     // The anchor root is a window of placeholder dirs that must never be
     // treated as local infrastructure even though it lives under ~/.dsh.
     localRootExclusions: [anchorRootDir],

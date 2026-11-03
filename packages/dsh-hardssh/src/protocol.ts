@@ -75,6 +75,7 @@ export const WORKSPACE_API = {
   state: WORKSPACE_API_BASE + '/state',
   sshWorkspaces: WORKSPACE_API_BASE + '/ws',
   sshWorkspaceDir: WORKSPACE_API_BASE + '/ws/dir',
+  sshWorkspaceMkdir: WORKSPACE_API_BASE + '/ws/mkdir',
 } as const
 
 /**

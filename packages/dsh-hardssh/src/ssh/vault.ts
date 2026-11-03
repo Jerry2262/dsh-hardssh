@@ -18,6 +18,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, scrypt, timi
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
+import { dshHomePath } from '../dsh-home.ts'
 
 /** File format version. */
 const FORMAT_VERSION = 1
@@ -101,7 +102,7 @@ interface VaultDocument {
  * ciphertext is only an offline scrypt target, not a usable credential.
  */
 export function vaultDirectory(): string {
-  return join(homedir(), '.dsh', 'ssh-secrets')
+  return dshHomePath('ssh-secrets')
 }
 
 /** Vault file location: <home>/.dsh/ssh-secrets/dsh-ssh-vault.json. */
@@ -111,7 +112,7 @@ export function vaultPath(): string {
 
 /** Pre-relocation vault location (<home>/.dsh/dsh-ssh-vault.json). */
 export function legacyVaultPath(): string {
-  return join(homedir(), '.dsh', 'dsh-ssh-vault.json')
+  return dshHomePath('dsh-ssh-vault.json')
 }
 
 /**

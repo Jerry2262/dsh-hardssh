@@ -19,6 +19,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { dshHomePath } from '../dsh-home.ts'
 
 /** File format version. */
 const FORMAT_VERSION = 1
@@ -45,7 +46,7 @@ interface KnownHostsFile {
 
 /** Default file location: <home>/.dsh/ssh-known-hosts.json. */
 export function knownHostsPath(): string {
-  return join(homedir(), '.dsh', 'ssh-known-hosts.json')
+  return dshHomePath('ssh-known-hosts.json')
 }
 
 /** Normalize a fingerprint to the canonical 'SHA256:<b64-no-padding>' form. */

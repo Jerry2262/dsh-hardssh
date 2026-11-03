@@ -25,11 +25,6 @@ export interface HardsshCore {
   engine: SshEngine
 }
 
-/**
- * @deprecated Use HardsshCore. Kept as a source-compatible migration alias.
- */
-export type EasysshCore = HardsshCore
-
 declare module '@deepseek-ai/cordis' {
   interface Context {
     hardsshCore: HardsshCore

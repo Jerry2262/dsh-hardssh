@@ -244,6 +244,24 @@
 
 /* Dropdown panel: native dsh flat card — 12px radius, hairline border,
    no shadow. */
+.flowErrorToast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  z-index: 100002;
+  box-sizing: border-box;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 8px 14px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-state-error-primary);
+  background: var(--dsw-alias-bg-base, #fff);
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+  transform: translateX(-50%);
+}
+
 .menuDropdown {
   position: fixed;
   z-index: 99999;

@@ -19,14 +19,19 @@
 - **工作区核心服务**：`ctx.workspaceCore`（通用 WorkspaceCore：台账 + provider 路由 + capability 连接）是**唯一**的工作区运行时；`ctx.hardsshCore` 只保留 `hosts` + `engine` 供 SSH 专用集成消费（如四列 IDE 形态的 `dsh-workbench-tiphareth`）。
 - **公开入口**：`@tiphareth/dsh-hardssh/base`（通用底座实现）、`@tiphareth/dsh-hardssh/workspace`（平台无关类型面）。
 
+## 数据目录
+
+插件的用户数据（SSH 主机存储、known_hosts、凭据 vault、工作区账本与 SSH 锚点）统一放在 Harness home 下：优先 `$DSH_HOME`，未设置时 `~/.dsh`（与内核一致）。`~/.ssh/config` 与私钥仍按操作系统用户读取，不受 `$DSH_HOME` 影响。
+
 ## 界面入口（全部走标准插件扩展点）
 
-插件不使用任何 DOM 注入；两个界面都是内核公开的槽位注册：
+主界面不使用 DOM 注入（侧栏工作区行的远程徽章、文件面板路径改写是自愈式 DOM 装饰）；界面入口都是内核公开的槽位注册：
 
 | 界面 | 入口 | 槽位 |
 |---|---|---|
 | **SSH 工作区管理**（服务器 + 工作区增删改查，服务器行带已连接/未连接徽章） | 左侧侧栏「新会话」与「工作区」之间的全局入口行 → 中央面板 | `sidebar.panellist`（行）+ `main`（面板，key 同为 `dsh-hardssh-workspaces`） |
 | **SSH 运维**（终端 / 传输 / 隧道 / 当前服务器命令） | 右侧栏标签条的「+」或右侧栏引导页入口 | `ctx.sidebarRightTabs.register`（类型）+ `sidebar.right.pane.tab`（正文）+ `sidebar.right.pane.tab.title`（标签文字） |
+| **SSH 工作区创建**（「添加工作区」菜单里的「SSH 工作区…」；先选服务器，再复用内核原生目录对话框，仅把数据面换成 SFTP） | 侧栏「工作区」头部的 ＋ / 空会话 hero 的添加工作区 | `sidebar.workspaces.directoryFlow` + `conversation.hero.workspace.directoryFlow`（负优先级覆盖原生 occupant；本地分支按引用渲染内核 occupant） |
 
 右侧栏 Tab 是 **page 类型**（不声明 `patterns`），只按 kind 打开，由用户从右侧栏自己的入口打开；插件不会强制展开右侧栏。右侧栏 Tab 实例是**每会话独立**的（内核的会话作用域语义），因此切换会话后需要重新打开该 Tab。
 
