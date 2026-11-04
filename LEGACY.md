@@ -1,36 +1,32 @@
 # 历史遗留问题（LEGACY）
 
-> 只记录**仍未解决的问题**和与问题直接相关的事实：现象、证据（文件/行号或会话 id）、影响、当前状态。
-> 不记录解决方案、实施计划或"下一步做什么"；结论实施后从本文件移除，过程记入 `CHANGELOG.md`。
+> 本文档是**待解决问题队列**，不是“已接受风险”清单。问题最终都要解决，记录在这里只为两件事：
+> 1. 发现问题的速度大于解决速度，不记下来会在会话中遗忘；
+> 2. 执行注意力集中在主线上，不因为途中发现一个问题就立刻分心。
+>
+> 已解决的问题从本文件删除，处理过程记入 `CHANGELOG.md`；不存在“已接受 / 不处理”状态。
 >
 > 最后更新：2026-11-04
 
-状态图例：`待决策`（需要你判断）/ `待办`（问题已确认、尚未消除）/ `已接受`（风险已知，暂不处理）/ `观察`（外部条件，暂不行动）。
+状态图例：`待处理`（已确认、排队解决）/ `待决策`（需要先确定方向）/ `等待外部条件`（依赖宿主升级、硬件或上游变化，条件满足后回到待处理）。
 
 ## 1. 权限与沙箱
 
-- **远端 Landlock 只能部分强制**（aliyun 内核 Landlock ABI 较旧）：`read-only` / `workspace-write` 在远端生效，但 stderr 会打印 `landlock-run: partial enforcement (older Landlock ABI)`，实际约束力弱于完整 enforce，且当前只在 aliyun + WSL 两台机器上观察过。**已接受**。
-- **远端 subprocess seam 的覆盖范围取决于消费者**：被替换的 `ctx.subprocess` 可以让任意插件在绑定会话里 spawn 远端进程；Landlock 约束来自本插件部署的 `landlock-run` 执行器，`commandPolicy` 只是按命令名/正则拦截的护栏，绕过方式（`$(…)`、base64、脚本调用）都成立。**已接受**。
-- **`danger-full-access` 下远端 `write` / `edit` 仍被限制在远端工作区根**：`write-fence` 对 danger 放行（[src/sandbox/write-fence.ts](packages/dsh-hardssh/src/sandbox/write-fence.ts) 第 30 行），但 `RemoteFileSystem.confineRoot` 无条件拒绝根外路径（[src/remote/remote-fs.ts](packages/dsh-hardssh/src/remote/remote-fs.ts) 第 178 行，`workspace.ssh-outside-root`）；本地 danger 不限制路径，两者语义不一致。**待办**（优先级低）。
-- **`RemoteFileSystem` 的可用范围是远端工作区根**：读取也受 `confineRoot` 约束（例如读 `/etc/os-release` 会被拒）；模型不知道这一限制，可能尝试读根外路径并收到拒绝。**已接受**。
-- **arm64 `landlock-run` 资产未在真机验证过**：目前只有 x86_64 的 aliyun + WSL 实测。**待办**（缺少 ARM 主机）。
-- **0.1.x 宿主不支持 `hardssh-shell`**：`apply()` 的前置版本检查会拒绝挂载，而不是降级。自用只跑 0.2.x。**已接受**。
+- **远端 Landlock 只能部分强制**：aliyun 内核 Landlock ABI 较旧，`read-only` / `workspace-write` 虽在远端生效，但 stderr 打印 `landlock-run: partial enforcement (older Landlock ABI)`，实际约束力弱于完整 enforce，目前只在 aliyun + WSL 两台机器上观察过。影响：远端写入隔离强度低于插件声明。**待决策**。
+- **远端 subprocess seam 可以绕过 `commandPolicy`**：被替换的 `ctx.subprocess` 允许任意插件在绑定会话里 spawn 远端进程；`commandPolicy` 只按命令名/正则拦截，`$(…)`、base64、脚本调用都能绕过。影响：登录节点限制不是硬边界。**待处理**。
+- **`danger-full-access` 下远端 `write` / `edit` 仍被限制在远端工作区根**：`write-fence` 对 danger 放行（[src/sandbox/write-fence.ts](packages/dsh-hardssh/src/sandbox/write-fence.ts) 第 30 行），但 `RemoteFileSystem.confineRoot` 无条件拒绝根外路径（[src/remote/remote-fs.ts](packages/dsh-hardssh/src/remote/remote-fs.ts) 第 178 行，`workspace.ssh-outside-root`）；本地 danger 不限制路径。影响：同一权限模式下本地/远端语义不一致。**待处理**。
+- **`RemoteFileSystem` 的读取范围也受工作区根限制**：读 `/etc/os-release` 这类根外路径会被拒，而模型没有收到这一限制的提示，可能反复尝试。影响：多轮无效操作。**待处理**。
+- **arm64 `landlock-run` 资产未在真机验证**：目前只有 x86_64 的 aliyun + WSL 实测。**等待外部条件**（ARM 主机）。
 
 ## 2. 测试覆盖
 
-- **live SSH 用例默认跳过**（需 `DSH_LIVE_SSH=1`）：默认套件不覆盖真实远端，CI 也没有真实 SSH；当前默认基线 672 通过 + 1 skipped，真实远端行为只靠手工会话验收。**已接受**。
+- **真实 SSH 不在默认套件或 CI 中**：live SSH 用例默认跳过（需 `DSH_LIVE_SSH=1`），默认 672 通过 + 1 skipped；真实远端行为只靠手工会话验收。影响：远端回归可能逃过测试。**待处理**。
 
-## 3. DSH 版本跟随
+## 3. 宿主升级适配
 
-- **依赖的公共 API 仍在变**：路由 seam 基于 `fs-sandbox` / `subprocess` / `bash-sandbox` 行与 `ctx.fs` / `ctx.subprocess` 契约，客户端依赖 slot 契约；`ctx.shell.execute` 等在 0.2.x 内也有过变动，peer 范围需要随宿主升级重新核对。**观察**。
-- **模型可见路径一致性依赖宿主内部方法**：公开的 `llm/stream` waterfall 收到的 options 已被 deepFreeze，无法改写；当前通过包装 LLM runtime 内部的 `streamWithRegistration` 把请求中的 anchor 路径替换成远端路径。该方法若改名或签名变化，包装会 fail open（保持原样），运行上下文 cwd 与 bash `pwd` 的不一致会重新暴露；DSH 升级后需复测。**观察**。
+- **依赖的公共契约仍在变**：路由 seam 基于 `fs-sandbox` / `subprocess` / `bash-sandbox` 行与 `ctx.fs` / `ctx.subprocess` 契约，客户端依赖 slot 契约；`ctx.shell.execute` 等在 0.2.x 内也有过变动。影响：DSH 升级可能破坏挂载或行为。**待处理**。
+- **模型可见路径重写依赖宿主内部方法**：公开 `llm/stream` waterfall 的 options 已被 deepFreeze，当前通过包装 LLM runtime 内部的 `streamWithRegistration` 把 anchor 路径翻译成远端路径。该方法改名或签名变化时包装 fail open，运行上下文 cwd 与 `bash pwd` 的不一致会重新暴露。影响：升级后可能出现模型注意力问题回归。**待处理**。
 
-## 4. 上游观察
+## 4. 产品与架构决策
 
-- **官方 `@deepseek-ai/dsh-ssh` 家族与我们的形态不同**：官方 `dsh-ssh` + `dsh-fs-ssh` / `dsh-subprocess-ssh` / `dsh-sandbox-ssh` / `ssh-helper-runtime` 是单部署静态 alias、需预装 helper、无 Web workspace 集成（官方文档明说 Web workspace 视图仍假设本地文件系统），且 peer 依赖精确钉在对应 DSH 版本；它无法承担"一个 DSH 内多个 SSH 工作区、按会话绑定并切换"的形态。**观察**（上游 0.2.2-alpha 线）。
-- npm 发布线存在 tag 差异：`latest` 为 0.1.6-alpha.1、`alpha` 为 0.2.2-alpha.3、`next` 为 0.2.1-rc.5；安装时必须按宿主版本选择而不是默认 `latest`。**观察**。
-
-## 5. 自用环境约束
-
-- **测试服务进程可能不在 bash 沙箱的 PID namespace 里**：`ps` / `lsof` 看不到，不能据此判断服务死活；端口探测（`curl` 返回 401 表示进程活着但需要鉴权）才可信。旧 3099 进程曾只能由外部终端停掉。**已接受**。
-- **`/tmp` 在 bash 工具里可能是 bwrap 私有目录**：跨调用不持久，脚本产物需要写到仓库内（`.dsh-e2e/tmp/`、`.dsh-e2e/transcripts/`）。**已接受**。
+- **同一个 DSH 进程内无法用纯路径区分本地与远端会话**：DSH 的 fs/subprocess 调用只带 cwd、不带 session/workspace 身份；远端工作区内部仍使用本地 anchor。影响：做不到让内核工作区路径本身等于远端绝对路径。**待决策**（是否投入宿主级 workspace/provider 感知路径改造）。
