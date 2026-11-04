@@ -19,6 +19,7 @@ SSH 工作区的 anchor 目录位于 `~/.dsh/workspace-anchors/<id>`（旧版为
 - 主机认证：key / agent / password，passphrase 密钥，ProxyJump 跳板机；`~/.ssh/config` 作为只读来源参与解析。
 - 远端目录选择与工作区创建在左侧「SSH 工作区」面板完成；工作区注册为原生 DSH 工作区。
 - 远端搜索：`glob` / `grep` 直接查远端（宿主有 ripgrep 时执行同一条 rg，否则走搜索阶梯）。
+- 会话可见路径一致：远端会话的运行上下文 cwd、文件策略与 `bash` 的 `pwd` 都显示远端路径，模型不会看到本地 anchor 占位路径。
 - 远端沙箱：首次连接自动上传 `landlock-run`；`read-only` / `workspace-write` preset 在远端生效。较旧内核仅部分强制并在 stderr 提示。
 - 可选每主机命令守卫（`commandPolicy`）：对 `bash` 与所有 `ctx.subprocess` spawn 生效，默认不拦截。
 
@@ -85,7 +86,7 @@ pnpm test          # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-默认测试基线：664 通过 + 1 skipped（live SSH opt-in）。历史遗留与待决策项见 [LEGACY.md](./LEGACY.md)，安全边界见 [SECURITY.md](./SECURITY.md)，适配手册见 [SKILLS.md](./SKILLS.md)。
+默认测试基线：672 通过 + 1 skipped（live SSH opt-in）。历史遗留与待决策项见 [LEGACY.md](./LEGACY.md)，安全边界见 [SECURITY.md](./SECURITY.md)，适配手册见 [SKILLS.md](./SKILLS.md)。
 
 ## FAQ
 

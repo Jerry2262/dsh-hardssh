@@ -4,12 +4,19 @@
 
 ## 未发布
 
+### 会话可见路径与远端 `pwd` 一致
+
+- 远端会话发给模型的请求在出站前把 anchor 路径翻译成远端根：运行上下文的工作目录、文件策略、工具结果与历史里的 anchor 路径都会替换，模型看到的 cwd 与 `bash` 的 `pwd` 一致，不再出现两个互相矛盾的工作目录。
+- 会话存档与内部路由仍使用本地 anchor；只有发给 provider 的请求被改写（公开 `llm/stream` waterfall 的 options 已被 deepFreeze，因此包装 LLM runtime 内部的请求漏斗，形状不匹配时 fail open）。
+- 新增 `tests/runtime/remote-context.test.ts`（copy-on-write 改写、JSON 转义、请求克隆等 8 个用例）；默认套件 **672 通过 + 1 skipped**，typecheck/build 通过。
+- 实测：远端会话回答“当前工作目录 `/home/jerry/tmp`”与 `pwd` 输出一致，turn 正常完成。
+
 ### 定位对齐：会话不再感知 SSH，anchor 路径去语义化
 
 - 删除 `localGuidance` / `remoteGuidance` 两段 system prompt 注入，删除 `announceToAgent` 配置项；本地会话与远端会话的模型可见上下文除 cwd 值外一致，不再出现「SSH / 远端主机 / 主机别名 / bash 在远端」等字样。连接配置、主机指纹、密码提示只存在于操作侧 UI。
 - 新 SSH 工作区的 anchor 根由 `~/.dsh/ssh-workspaces/<id>` 改为中性路径 `~/.dsh/workspace-anchors/<id>`，避免会话 cwd 字符串带 SSH 含义；旧 root 继续被识别（已有工作区记录里的 anchor 路径照常路由），不做强制迁移。
 - 会话存档仍全部保存在本地 `$DSH_HOME/sessions/<encoded-cwd>/`，规则与本地工作区一致。
-- 测试：删除公告测试，anchor 根保留旧 root 兼容；默认套件 **664 通过 + 1 skipped**（live SSH opt-in），typecheck/build 通过。
+- 测试：删除公告测试，anchor 根保留旧 root 兼容；默认套件当时 **664 通过 + 1 skipped**（live SSH opt-in），typecheck/build 通过。
 - 已知差距（记录于 LEGACY §6）：会话 cwd 仍是本地 anchor 而非远端绝对路径，`bash pwd` 返回远端路径，两者可能不一致。
 
 ### 定位收窄：删除多主机 SSH 运维面，只保留「远端目录 = 工作区」

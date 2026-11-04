@@ -46,6 +46,7 @@ import { withSshConfig } from './ssh/ssh-config.ts'
 import { Vault } from './ssh/vault.ts'
 import { mountWorkspaceCore, genericLedgerPath, type WorkspaceCore } from './runtime/workspace-core.ts'
 import { mountHardsshHealth, watchHardsshOptionalServices } from './runtime/health.ts'
+import { mountRemoteWireTranslation, remoteBindings } from './runtime/remote-context.ts'
 import { inspectGenericLedger, recoverGenericLedger } from './runtime/workspace-recovery.ts'
 
 /** Stable cordis plugin name. */
@@ -304,6 +305,12 @@ export function apply(ctx: Context, config?: Config): void {
   })
   // Preserve the established SSH anchor layout across the one-time import.
   const workspaces: WorkspaceStoreView = new GenericWorkspaceStore(genericCore, boot, anchorRoot())
+
+  // Last model-visible boundary: a bound session's kernel cwd is the local
+  // anchor, while bash runs on the server. Rewrite the outgoing request paths to
+  // the remote root so the model sees one consistent working directory. This is
+  // presentation only — fs/subprocess routing still keys off the anchor.
+  mountRemoteWireTranslation(ctx, () => remoteBindings(genericCore))
 
   // SSH-specific integrations retain only the shared host store and engine.
   // dsh-workbench consumes `workspaceCore` directly; no sshWorkspaceCore or

@@ -18,11 +18,12 @@
 
 ## 2. 测试覆盖
 
-- **live SSH 用例默认跳过**（需 `DSH_LIVE_SSH=1`）：默认套件不覆盖真实远端，CI 也没有真实 SSH；当前默认基线 664 通过 + 1 skipped，真实远端行为只靠手工会话验收。**已接受**。
+- **live SSH 用例默认跳过**（需 `DSH_LIVE_SSH=1`）：默认套件不覆盖真实远端，CI 也没有真实 SSH；当前默认基线 672 通过 + 1 skipped，真实远端行为只靠手工会话验收。**已接受**。
 
 ## 3. DSH 版本跟随
 
 - **依赖的公共 API 仍在变**：路由 seam 基于 `fs-sandbox` / `subprocess` / `bash-sandbox` 行与 `ctx.fs` / `ctx.subprocess` 契约，客户端依赖 slot 契约；`ctx.shell.execute` 等在 0.2.x 内也有过变动，peer 范围需要随宿主升级重新核对。**观察**。
+- **模型可见路径一致性依赖宿主内部方法**：公开的 `llm/stream` waterfall 收到的 options 已被 deepFreeze，无法改写；当前通过包装 LLM runtime 内部的 `streamWithRegistration` 把请求中的 anchor 路径替换成远端路径。该方法若改名或签名变化，包装会 fail open（保持原样），运行上下文 cwd 与 bash `pwd` 的不一致会重新暴露；DSH 升级后需复测。**观察**。
 
 ## 4. 上游观察
 
@@ -33,7 +34,3 @@
 
 - **测试服务进程可能不在 bash 沙箱的 PID namespace 里**：`ps` / `lsof` 看不到，不能据此判断服务死活；端口探测（`curl` 返回 401 表示进程活着但需要鉴权）才可信。旧 3099 进程曾只能由外部终端停掉。**已接受**。
 - **`/tmp` 在 bash 工具里可能是 bwrap 私有目录**：跨调用不持久，脚本产物需要写到仓库内（`.dsh-e2e/tmp/`、`.dsh-e2e/transcripts/`）。**已接受**。
-
-## 6. 会话可见性（与 VS Code Remote-SSH 的差距）
-
-- **会话 cwd 是本地 anchor，不是远端绝对路径**：远端会话的运行上下文显示 `~/.dsh/workspace-anchors/<id>`（旧工作区仍显示 `~/.dsh/ssh-workspaces/<id>`），而 `bash` 在远端执行、`pwd` 返回远端根（如 `/home/jerry/tmp`）。同一会话里这两个路径值不一致；模型若直接引用运行时 cwd，会与命令输出矛盾。实测（`session-94f3357b-67bc-4da1-b56f-506717d4fed2`）：bash 的 `pwd` 返回 `/home/jerry`，运行上下文 cwd 是测试 anchor，模型在回答里明确指出了两者不一致。**已接受**（不做宿主级虚拟路径改造）。
