@@ -225,24 +225,25 @@ function renderWorkspaceGuidance(workspaces: WorkspaceStoreView, context: unknow
 
 /** Local-session branch of the announcement. Exported for the guidance test. */
 export function localGuidance(): string {
-  return '本机已安装 dsh-hardssh 插件（SSH 工作区）。当前会话是本机工作区：正常使用全部工具（pwsh / glob / grep / read / write / edit），文件操作在本机。remote_ls / remote_search / remote_status 与 ssh_exec / ssh_upload / ssh_download / ssh_tunnel / ssh_cluster 用于一次性远程运维（消耗真实远程资源，先确认再执行）。用户提到「SSH 工作区 / 远程工作区 / 远程文件 / 远程项目 / 远程服务器上改代码」时即指本插件。'
+  return '本机已安装 dsh-hardssh 插件（SSH 工作区）。当前会话是本机工作区：正常使用全部工具（pwsh / bash / glob / grep / read / write / edit），文件操作与 bash 命令都在本机执行。remote_ls / remote_search / remote_status 与 ssh_exec / ssh_upload / ssh_download / ssh_tunnel / ssh_cluster 用于一次性远程运维（消耗真实远程资源，先确认再执行）。用户提到「SSH 工作区 / 远程工作区 / 远程文件 / 远程项目 / 远程服务器上改代码」时即指本插件。'
 }
 
 /**
  * SSH-bound-session branch of the announcement.
  *
- * The tool facts here must match the seams. read/write/edit route through
- * `SwitchFileSystem` (server data remote, client-declared local roots local).
- * glob/grep do NOT: they run the CLIENT's bundled ripgrep through
- * `ctx.subprocess`, which cannot see the remote workspace, so the subprocess
- * facade refuses that combination and points here to the remote tools. `pwsh`
- * is a client-native binary and runs on this machine.
+ * The tool facts here must match the seams. read/write/edit and bash route to
+ * the remote host (bash runs through the remote Landlock launcher under the
+ * session's permission preset); glob/grep are served by the remote workspace
+ * search bridge. `pwsh` is a client-native binary and still runs on this
+ * machine. The announcement must say that bash itself is remote: without it a
+ * model calls the remote result "本机" and cannot tell the two worlds apart.
  *
  * Exported for the guidance test.
  */
 export function remoteGuidance(record: SshWorkspaceRecord): string {
   return `本机已安装 dsh-hardssh 插件（SSH 工作区）。当前会话绑定到远程工作区「${record.title}」，主机别名是 \`${record.alias}\`（${record.remoteRoot}）：
 - read / write / edit 自动路由到远程（SFTP）；路径用远程绝对路径（如 ${record.remoteRoot}/src/main.ts），相对路径以远程根目录为基准。
+- bash 工具同样在远端执行（\`bash -c\` 语义），文件写入由远端 Landlock 沙箱按会话权限 preset 约束；远端 shell 操作直接用 bash，不需要改用 ssh_exec。
 - glob / grep 在 SSH 工作区里**直接查远端**：宿主机有 ripgrep 时在服务器上执行同一条 rg 命令；没有时代答（POSIX find/grep 模板或 SFTP 遍历），返回格式与原生一致（glob 只列文件，grep 返回「路径:行号:内容」）。搜索路径按工作区根用 POSIX 形式给出，超出工作区根的路径会被拒绝。需要正则内容检索、更多条数/字节控制时用 remote_search（可选 syntax="regex"，宿主机既无 rg 也无 GNU grep 时会明确报错），列目录用 remote_ls，连接与回退状态用 remote_status。
 - ssh_exec / ssh_upload / ssh_download / ssh_tunnel / ssh_cluster 的 alias 参数用 \`${record.alias}\`，不要用工作区标题「${record.title}」。
 - pwsh / powershell / cmd 是客户端原生二进制，在本机执行；远端为 POSIX 主机时请用 bash 语义命令或 ssh_exec。

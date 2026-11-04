@@ -4,6 +4,12 @@
 
 ## 未发布
 
+### 修复：SSH 工作区公告未说明 `bash` 也在远端执行
+
+- 现象：远端会话里模型先用 `ssh_exec` 探路，回答里把 bash 侧称作“本机”、并得出“远程工作区和本地执行环境是同一台”的错误结论；本地临时对比时两边答案不对称。
+- 修复：`remoteGuidance` 明确「bash 工具同样在远端执行（`bash -c` 语义），文件写入由远端 Landlock 按会话 preset 约束；远端 shell 操作直接用 bash，不需要改用 ssh_exec」；`localGuidance` 明确 bash 命令在本机执行。`workspace-guidance` 测试同步断言这两句。
+- 验证：默认套件 771 通过 + 1 live skipped；用同一测试服务新建两个 workspace-bound tmp 会话执行「当前是什么系统」——本地会话 bash 命中 WSL/Windows 主机，远端会话只用 bash 即命中 aliyun 并明确描述为远端服务器，不再出现“本机同一台”的混淆。
+
 ### 新功能：SSH 工作区的权限语义在远端生效（自部署 Landlock 沙箱）
 
 - 根因：`bash` 工具在 SSH 会话里经由 base 的 `bash-sandbox` → `ctx.subprocess` 执行，而 `ctx.subprocess` 已被插件的路由 facade 替换，于是**本地** bwrap 包装被原样送到远端执行（远端没有 bwrap，`env: 'bwrap': No such file or directory`，exit 127），SSH 会话的 bash 完全不可用；同时远端 `write`/`edit` 在 switch-fs 里显式丢弃了 per-call sandbox policy，`read-only` 会话仍能写远端文件。

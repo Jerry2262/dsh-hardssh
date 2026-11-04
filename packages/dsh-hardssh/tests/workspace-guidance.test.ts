@@ -33,6 +33,10 @@ describe('workspace guidance', () => {
     expect(text).toContain('直接查远端')
     expect(text).toContain('remote_search')
     expect(text).toContain('pwsh / powershell / cmd 是客户端原生二进制，在本机执行')
+    // bash is remote too; without this statement a model calls the remote
+    // result "本机" and cannot tell the two worlds apart in its answer.
+    expect(text).toContain('bash 工具同样在远端执行')
+    expect(text).toContain('不需要改用 ssh_exec')
     // The binding facts stay accurate.
     expect(text).toContain('prod')
     expect(text).toContain('/srv/app')
@@ -46,7 +50,8 @@ describe('workspace guidance', () => {
   it('keeps the local-session branch describing full local tool availability', () => {
     const text = localGuidance()
     expect(text).toContain('当前会话是本机工作区')
-    expect(text).toContain('pwsh / glob / grep / read / write / edit')
+    expect(text).toContain('bash')
+    expect(text).toContain('文件操作与 bash 命令都在本机执行')
     expect(text).not.toContain('不可用')
   })
 })
