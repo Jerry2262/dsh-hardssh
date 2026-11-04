@@ -2,7 +2,7 @@
  * Live reader for the user's `~/.ssh/config`.
  *
  * The plugin used to only IMPORT that file once, snapshotting it into
- * `~/.dsh/dsh-ssh.json`. VS Code Remote-SSH instead treats the file as the
+ * `~/.dsh/dsh-hardssh-ssh.json`. VS Code Remote-SSH instead treats the file as the
  * source of truth: a host added there is usable immediately, and an edited
  * port/user/key is picked up without a re-import. This module is the read half
  * of that model.
@@ -141,7 +141,7 @@ export function parseSshConfigText(text: string): SshConfigRead {
  * Read and parse the user's `~/.ssh/config` on demand.
  *
  * A missing or unreadable file is an EMPTY result, not an error: the plugin must
- * stay usable for users who keep every host in `dsh-ssh.json`, and a permissions
+ * stay usable for users who keep every host in `dsh-hardssh-ssh.json`, and a permissions
  * problem on this optional source must not break the host list.
  * @param configPath - file to read; defaults to the standard location.
  * @returns addressable hosts plus skipped blocks.
@@ -211,7 +211,7 @@ export function sshConfigHostEntry(host: SshConfigHost): SshHostEntry {
  *
  * This is the read half of the VS Code Remote-SSH model: `~/.ssh/config` is
  * re-read on every call, so a host added or edited there is usable immediately,
- * while `dsh-ssh.json` keeps the override/metadata layer (a GUI edit never
+ * while `dsh-hardssh-ssh.json` keeps the override/metadata layer (a GUI edit never
  * writes back to the user's ssh config). The plugin never mutates that file.
  * @param base - the stored host view (owned by the plugin).
  * @param configPath - ssh config to read; defaults to the standard location.

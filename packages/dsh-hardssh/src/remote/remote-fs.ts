@@ -1,7 +1,7 @@
 /**
  * Remote filesystem provider for the `ctx.fs` capability seam: paths,
  * contents, and atomic staging files live on the remote host, reached through
- * the dsh-ssh engine's SFTP/exec primitives. Ported and adapted from
+ * the SSH engine's SFTP/exec primitives. Ported and adapted from
  * UynajGI/dsh-ssh (MIT, https://github.com/UynajGI/dsh-ssh) — the seam
  * contract (targets, versions, atomic writes, CRLF handling, canonical path
  * resolution) is preserved; the connection owner is replaced by the shared
@@ -133,7 +133,7 @@ function isNotFound(error: unknown): boolean {
 }
 
 /**
- * Remote filesystem backend over the dsh-ssh engine. The working directory
+ * Remote filesystem backend over the SSH engine. The working directory
  * follows the mode store: relative paths resolve against the resolved remote
  * root; a POSIX-absolute cwd override is honored; local (Windows) cwds are
  * ignored so the model's relative-path habit keeps working remotely.

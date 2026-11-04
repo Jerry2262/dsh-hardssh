@@ -10,7 +10,7 @@
  * tail-window collector in `src/remote/output.ts` — that one keeps a SUFFIX and
  * uses the mirror-image `utf8CeilStart`; the two are deliberately separate
  * policies, not duplicates).
- * @module dsh-ssh/exec/output
+ * @module dsh-hardssh/ssh/exec/output
  */
 
 import { StringDecoder } from 'node:string_decoder'

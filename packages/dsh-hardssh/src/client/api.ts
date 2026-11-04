@@ -1,6 +1,6 @@
 /**
  * Browser-side API clients: the /api/dsh-hardssh route family (SSH workspace
- * CRUD, remote dir browsing, workspace file ops) plus the two /api/dsh-ssh
+ * CRUD, remote dir browsing, workspace file ops) plus the two /api/dsh-hardssh/ssh
  * endpoints the config dialog needs (host create + test). Plain fetch, same
  * origin 鈥?the only data path the panel components use.
  */

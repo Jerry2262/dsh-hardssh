@@ -12,9 +12,9 @@ export interface ConnectionErrorDialogProps {
 export function ConnectionErrorDialog({ alias, detail, onClose }: ConnectionErrorDialogProps) {
   return (
     <div className={css.modalBackdrop} onClick={onClose}>
-      <div className={css.modal} role="alertdialog" aria-modal="true" aria-labelledby="dsh-ssh-connection-error-title" onClick={event => { event.stopPropagation() }}>
+      <div className={css.modal} role="alertdialog" aria-modal="true" aria-labelledby="dsh-hardssh-connection-error-title" onClick={event => { event.stopPropagation() }}>
         <div className={css.modalHeader}>
-          <h3 id="dsh-ssh-connection-error-title" className={css.modalTitle}>
+          <h3 id="dsh-hardssh-connection-error-title" className={css.modalTitle}>
             {tt('connectionError.title', { alias })}
           </h3>
         </div>

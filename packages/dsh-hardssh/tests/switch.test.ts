@@ -95,15 +95,15 @@ describe('SwitchFileSystem cwd routing', () => {
       worldForNamespace: ns => (ns === namespace ? world : undefined),
     })
 
-    await expect(facade.resolve(`${denied}/dsh-ssh-vault.json`, { cwd: '/workspace/a' })).rejects.toThrow(/protected client directory/)
-    await expect(facade.lstat(`${denied}/dsh-ssh-vault.json`)).rejects.toThrow(/protected client directory/)
+    await expect(facade.resolve(`${denied}/dsh-hardssh-ssh-vault.json`, { cwd: '/workspace/a' })).rejects.toThrow(/protected client directory/)
+    await expect(facade.lstat(`${denied}/dsh-hardssh-ssh-vault.json`)).rejects.toThrow(/protected client directory/)
     expect(localResolve).not.toHaveBeenCalled()
     expect(remoteResolve).not.toHaveBeenCalled()
 
     // The deny must also cover TARGET-based dispatch, which never passes
     // through resolve/lstat: a target whose LOCAL key is the vault path (the
     // local backend keys targets by canonical path) is refused on read too.
-    const stolen = { targetKey: `${denied}/dsh-ssh-vault.json`, displayPath: `${denied}/dsh-ssh-vault.json` } as never
+    const stolen = { targetKey: `${denied}/dsh-hardssh-ssh-vault.json`, displayPath: `${denied}/dsh-hardssh-ssh-vault.json` } as never
     await expect(facade.readText(stolen, undefined)).rejects.toThrow(/protected client directory/)
     expect(localReadText).not.toHaveBeenCalled()
   })

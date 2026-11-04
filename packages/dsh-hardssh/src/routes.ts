@@ -1,7 +1,7 @@
 /**
  * The /api/dsh-hardssh route family: SSH-bound workspace CRUD and remote
  * directory browsing for the workspace-creation picker. Every route carries
- * the same loopback-only trust fence as /api/dsh-ssh — these endpoints can
+ * the same loopback-only trust fence as /api/dsh-hardssh/ssh — these endpoints can
  * read and write files on remote servers, so LAN-exposed dsh web deployments
  * must not serve them.
  *

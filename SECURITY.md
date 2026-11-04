@@ -23,9 +23,9 @@ constraint set around it.
 
 | Surface | Constraint | Where |
 |---|---|---|
-| HTTP REST (`/api/dsh-ssh/*`, `/api/dsh-hardssh/*`) | loopback peer **and** loopback `Host` header **and** same-origin (`Origin` / `Sec-Fetch-Site`) — a DNS-rebound page cannot reach it | `src/host-http.ts`, `src/routes.ts`, `src/ssh/routes.ts` (`guard()`) |
+| HTTP REST (`/api/dsh-hardssh/ssh/*`, `/api/dsh-hardssh/*`) | loopback peer **and** loopback `Host` header **and** same-origin (`Origin` / `Sec-Fetch-Site`) — a DNS-rebound page cannot reach it | `src/host-http.ts`, `src/routes.ts`, `src/ssh/routes.ts` (`guard()`) |
 | WebSocket terminal upgrade | the same loopback + same-origin check before `handleUpgrade` | `src/ssh/routes.ts` |
-| Host configuration | `~/.dsh/dsh-ssh.json`, written `0600` inside a `0700` directory | `src/ssh/store.ts` |
+| Host configuration | `~/.dsh/dsh-hardssh-ssh.json`, written `0600` inside a `0700` directory | `src/ssh/store.ts` |
 | Credentials | **not persisted by default** (`secretStorage: none`): session memory only, reused for the lifetime of a pooled connection. Opt-in `vault` mode encrypts with AES-256-GCM + scrypt (`0600`), and that directory is refused by the fs seam even in a bound session | `src/ssh/vault.ts`, `src/fs.ts` (`deniedRoots`) |
 | Host identity | trust-on-first-use; a changed host key re-prompts | `src/ssh/…` |
 | Remote file operations | every path is resolved and confined to the workspace's remote root; a symlink that escapes fails closed | `src/remote/remote-fs.ts` (`confine`) |
@@ -57,7 +57,7 @@ The per-item list — every site the scanner matches, what it is, and who can re
 | Scanner finding | What the code actually is |
 |---|---|
 | `Shell command execution` — `src/base/capability.ts:53`, `src/ssh/capabilities/service.ts:174` | **Interface declarations** (`WorkspaceProcessRuntime.exec`, `RemoteCapabilityDeps.exec`). No implementation, no shell, no `child_process`. The rule matches the method name. |
-| `Shell command execution` — `src/ssh/engine.ts:298-300` | The SSH exec API: run one command on a **user-configured remote host** over the pooled connection, with a server-side budget so a timeout cannot orphan the remote process. Reached by the `ssh_exec` / `ssh_cluster` tools and by the loopback-only `/api/dsh-ssh/exec` route. |
+| `Shell command execution` — `src/ssh/engine.ts:298-300` | The SSH exec API: run one command on a **user-configured remote host** over the pooled connection, with a server-side budget so a timeout cannot orphan the remote process. Reached by the `ssh_exec` / `ssh_cluster` tools and by the loopback-only `/api/dsh-hardssh/ssh/exec` route. |
 | `Shell command execution` — `src/providers/local/provider.ts:305` | Local workspace-process fallback for base-only consumers: `child_process.exec(command, { cwd })` **after** `assertInsideRoot`. The command string arrives from the in-process DSH subprocess seam (the agent's own shell tool), never from an HTTP request. |
 | `Child process module usage` — `src/providers/local/provider.ts:140/142` | Delegation to DSH's `LocalSubprocessRuntime`, cwd root-jailed first. `node:child_process` is imported in exactly one source file (the standalone fallback above). |
 | `Reference to .ssh credentials` — `src/client/ssh/locales.ts:57/227` | **UI hint strings** only. They used to name a default private-key file as the example; they now describe the field generically, so no credential path or key filename is embedded. No file access was involved either way. |

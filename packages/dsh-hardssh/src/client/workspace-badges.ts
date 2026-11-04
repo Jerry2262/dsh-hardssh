@@ -3,7 +3,7 @@
  * title matches an SSH-bound workspace with a compact remote badge
  * (`alias @ remoteRoot`), so a glance tells a local workspace from a remote
  * one. Pure DOM-level extension (the sidebar shell exposes no slot for row
- * decoration), following the dsh-ssh sidebar-entry precedent: a
+ * decoration), following the SSH side-entry precedent: a
  * MutationObserver self-heals when React re-renders displace the injected
  * badge.
  *

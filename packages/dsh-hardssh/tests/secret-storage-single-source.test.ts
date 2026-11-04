@@ -1,7 +1,7 @@
 /**
  * C-04: `secretStorage` must have ONE source of truth. The mode is decided
  * once from the plugin config — that is what constructs the Vault and the
- * SecureHostStore — while the `dsh-ssh` settings namespace still exposes the
+ * SecureHostStore — while the `dsh-hardssh` settings namespace still exposes the
  * key for the settings UI. A disagreement must be reported (reload required +
  * the mode actually running), never silently accepted.
  *
@@ -116,8 +116,8 @@ describe('watchSecretStorageDrift (apply wiring)', () => {
 })
 
 describe('the settings namespace does NOT expose secretStorage (single source)', () => {
-  it('keeps the key out of the dsh-ssh namespace schema', () => {
-    expect(SSH_SETTINGS_NAMESPACE).toBe('dsh-ssh')
+  it('keeps the key out of the dsh-hardssh namespace schema', () => {
+    expect(SSH_SETTINGS_NAMESPACE).toBe('dsh-hardssh')
     // The mode is decided at plugin load from the top-level plugin config, so
     // offering it here would be a placebo; a hand-set namespace value is
     // reported as drift instead of being applied.

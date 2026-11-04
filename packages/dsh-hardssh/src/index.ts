@@ -2,14 +2,14 @@
  * dsh-hardssh — host half. Owns the local⇄remote mode store, the
  * /api/dsh-hardssh route family (loopback-only), the remote_* agent
  * tools, a model-facing announcement section, the generic workspace core,
- * and the SSH operations capability (host manager, ssh_* tools, /api/dsh-ssh,
- * web terminal). In SSH mode the model's ordinary read/write/edit/bash tools
- * run transparently on the remote host through those switch rows. File
- * operations and SSH operations ride ONE shared SshEngine/HostStore over
- * ~/.dsh/dsh-ssh.json (a single connection pool; SSH ops and workspaces
- * invalidate together on config change). The browser half (./client) renders
- * the header buttons, the SSH config dialog, the left workspace panel, and
- * the SSH host-manager surfaces.
+ * and the SSH operations capability (host manager, ssh_* tools,
+ * /api/dsh-hardssh/ssh, web terminal). In SSH mode the model's ordinary
+ * read/write/edit/bash tools run transparently on the remote host through
+ * those switch rows. File operations and SSH operations ride ONE shared
+ * SshEngine/HostStore over ~/.dsh/dsh-hardssh-ssh.json (a single connection
+ * pool; SSH ops and workspaces invalidate together on config change). The
+ * browser half (./client) renders the header buttons, the SSH config dialog,
+ * the left workspace panel, and the SSH host-manager surfaces.
  *
  * The announcement section is rendered PER SESSION from the workspace facts
  * (which workspace this session's cwd binds to), never from path-string
@@ -70,8 +70,8 @@ export interface Config {
    * surfaces this row mounts after the check below: the /api/dsh-hardssh
    * workspace CRUD routes, the remote_* workspace agent tools, and the
    * workspace announcement section. It does NOT gate the SSH operations
-   * capability (host manager, ssh_* tools, /api/dsh-ssh, web terminal — its
-   * own `dsh-ssh` settings namespace `enabled`), the shared
+   * capability (host manager, ssh_* tools, /api/dsh-hardssh/ssh, web terminal
+   * — its own `dsh-hardssh` settings namespace `enabled`), the shared
    * engine/host-store/vault, the fs/subprocess routing rows, or the seam
    * replacement itself: those mount before this switch and keep running.
    */
@@ -85,7 +85,7 @@ export interface Config {
    *
    * This is the SINGLE SOURCE for the mode: the Vault and SecureHostStore are
    * constructed once from it when the plugin loads, so changing it requires a
-   * plugin reload. The `dsh-ssh` settings namespace also exposes
+   * plugin reload. The `dsh-hardssh` settings namespace also exposes
    * `secretStorage` for the settings UI, but that value cannot switch storage
    * mode at runtime (see reportSecretStorageDrift below).
    */
@@ -127,17 +127,17 @@ function secretStorageOf(section: unknown): 'none' | 'vault' | undefined {
 /**
  * Report a secretStorage disagreement between the RUNNING mode (fixed when the
  * Vault/SecureHostStore were constructed at plugin load) and the value the
- * `dsh-ssh` settings namespace currently resolves to. The mode cannot change
+ * `dsh-hardssh` settings namespace currently resolves to. The mode cannot change
  * at runtime, so staying silent would let the settings UI claim a storage mode
  * this process is not using.
  * @param running - the construction-time mode actually in effect.
- * @param section - the resolved `dsh-ssh` settings section (any shape).
+ * @param section - the resolved `dsh-hardssh` settings section (any shape).
  * @returns the warning text, or undefined when both agree / the value is unusable.
  */
 export function secretStorageDriftMessage(running: 'none' | 'vault', section: unknown): string | undefined {
   const requested = secretStorageOf(section)
   if (requested === undefined || requested === running) return undefined
-  return `[dsh-hardssh] secretStorage: the dsh-ssh settings namespace resolves to '${requested}' but this process is running '${running}'. The mode is fixed by the plugin config (secretStorage) when the plugin loads — the vault and host store are constructed once — so the namespace value is ignored; set secretStorage: '${requested}' in the plugin config and reload the plugin (restart dsh web) to switch.`
+  return `[dsh-hardssh] secretStorage: the dsh-hardssh settings namespace resolves to '${requested}' but this process is running '${running}'. The mode is fixed by the plugin config (secretStorage) when the plugin loads — the vault and host store are constructed once — so the namespace value is ignored; set secretStorage: '${requested}' in the plugin config and reload the plugin (restart dsh web) to switch.`
 }
 
 /**
@@ -202,7 +202,7 @@ export async function bootstrapGenericWorkspaceCore(core: WorkspaceCore, options
   await core.initialize()
 }
 
-/** Order of the announcement section (right after the dsh-ssh section at 150). */
+/** Order of the announcement section (right after the plugin:dsh-hardssh-ssh section at 150). */
 const SECTION_ORDER = 160
 
 /** Minimal shape of the assembly context the guidance section reads. The DSH
@@ -343,7 +343,7 @@ export function apply(ctx: Context, config?: Config): void {
     announceToAgent: config?.announceToAgent ?? true,
     // Secret storage: 'none' (VSCode Remote-SSH style; default) or 'vault'.
     // Single-sourced: the Vault/SecureHostStore below are built from THIS
-    // value, and any disagreement with the dsh-ssh settings namespace is
+    // value, and any disagreement with the dsh-hardssh settings namespace is
     // reported through secretStorageDriftMessage (never silently accepted).
     secretStorage: resolveSecretStorageMode(config),
     // Env-based vault auto-unlock is opt-in (see the Config docs): the variable
@@ -419,10 +419,10 @@ export function apply(ctx: Context, config?: Config): void {
   const core: HardsshCore = { hosts: secureHosts, engine }
   ctx.provide('hardsshCore', core)
 
-  // SSH operations capability (host manager, ssh_* tools, /api/dsh-ssh,
+  // SSH operations capability (host manager, ssh_* tools, /api/dsh-hardssh/ssh,
   // terminal, settings, prompt) — mounted against the SAME engine/store and
   // kept independent of the workspace `enabled` switch below (its own
-  // `dsh-ssh` settings namespace toggles it). The host-delete reference guard
+  // `dsh-hardssh` settings namespace toggles it). The host-delete reference guard
   // reads the same record source as the workspace surfaces.
   mountSshCapability(ctx, { store: secureHosts, engine, knownHosts, vault, ledger: workspaces, health })
 
@@ -449,7 +449,7 @@ export function apply(ctx: Context, config?: Config): void {
   ctx.effect(() => () => { guardDispose() }, 'dsh-hardssh: command-guard')
 
   // C-04: secretStorage is a construction-time decision (vault + store above).
-  // The dsh-ssh settings namespace exposes the same key for the settings UI,
+  // The dsh-hardssh settings namespace exposes the same key for the settings UI,
   // but its resolve() only reads enabled/announceToAgent, so editing it cannot
   // switch storage mode. Report the disagreement instead of pretending it
   // applied: once at mount, then on every committed settings change. The

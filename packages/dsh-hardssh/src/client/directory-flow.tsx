@@ -60,7 +60,7 @@ export interface DirectoryFlowInjected {
   createSshWorkspace: (input: { title: string; alias: string; remoteRoot: string }) => Promise<SshWorkspaceRecord>
   /** List configured SSH hosts (host API). */
   listHosts: () => Promise<Array<{ alias: string; host: string; port: number; user: string }>>
-  /** Create a new SSH host (dsh-ssh host store; auth is required). */
+  /** Create a new SSH host (dsh-hardssh-ssh host store; auth is required). */
   createHost: (input: {
     alias: string
     host: string

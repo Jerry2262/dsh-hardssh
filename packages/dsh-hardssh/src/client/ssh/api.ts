@@ -1,5 +1,5 @@
 /**
- * Browser-side API client for the /api/dsh-ssh route family. The only data
+ * Browser-side API client for the /api/dsh-hardssh/ssh route family. The only data
  * access path the panel components use — plain fetch/WebSocket, same origin.
  */
 

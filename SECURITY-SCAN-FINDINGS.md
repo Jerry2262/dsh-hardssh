@@ -15,7 +15,7 @@ secrets, exfiltration endpoints, destructive patterns and mining are blocking. T
 repository has none of those four: no secret material is embedded, `src/` contains no
 third-party endpoint (every `fetch()` targets this plugin's own `/api/...` routes), and file
 deletion/rewrite is limited to a resolved workspace root plus the plugin's own state files
-(`~/.dsh/dsh-ssh.json`, the optional vault, the workspace ledger — all written by atomic
+(`~/.dsh/dsh-hardssh-ssh.json`, the optional vault, the workspace ledger — all written by atomic
 temp-file rename).
 
 Verify the load-bearing claims yourself:
@@ -49,12 +49,12 @@ Seven sites carry the method name `exec`. Six are not local shell execution at a
 | A3 | `src/ssh/engine.ts:298-300` | **Remote execution over the pooled SSH connection** (ssh2 channel): run one command on a host the user configured. Wrapped in a server-side budget (`wrapCommandWithServerBudget`) so a client timeout cannot leave an orphan process on the server. |
 | A4 | `src/ssh/engine.ts:194` | The **binding** that feeds A3 into the capability probe: `exec: (alias, command, options) => this.exec(...)`. Not a second implementation. |
 | A5 | `src/providers/ssh/provider.ts:94` | The SSH provider's `process()` capability factory — returns DSH's `SshSubprocessRuntime` (structured argv/env/stdio + terminal protocol). No local process is started. |
-| A6 | `src/client/ssh/api.ts:135` | **Browser-side wrapper**: `fetch(SSH_API.exec, { method: 'POST', … })` → posts to this plugin's own `/api/dsh-ssh/exec`. Runs nothing locally; the server route is loopback + same-origin gated. |
+| A6 | `src/client/ssh/api.ts:135` | **Browser-side wrapper**: `fetch(SSH_API.exec, { method: 'POST', … })` → posts to this plugin's own `/api/dsh-hardssh/ssh/exec`. Runs nothing locally; the server route is loopback + same-origin gated. |
 | A7 | `src/providers/local/provider.ts:305` | The **local workspace-process fallback** for base-only consumers: `child_process.exec(command, { cwd })`. `cwd` is resolved and checked by `assertInsideRoot` **before** the call. |
 
 Who can reach each of these:
 
-- **A3 / A4 / A5** — the `ssh_exec` / `ssh_cluster` agent tools, and `POST /api/dsh-ssh/exec`.
+- **A3 / A4 / A5** — the `ssh_exec` / `ssh_cluster` agent tools, and `POST /api/dsh-hardssh/ssh/exec`.
   That route goes through `guard()` (`src/ssh/routes.ts:353`): loopback peer **and** loopback
   `Host` **and** same-origin `Origin` / `Sec-Fetch-Site`. The WebSocket terminal upgrade
   applies the same check before `handleUpgrade` (`src/ssh/routes.ts:1017`).

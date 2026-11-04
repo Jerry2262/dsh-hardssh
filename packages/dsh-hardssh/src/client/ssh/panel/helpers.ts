@@ -1,6 +1,6 @@
 /**
  * Shared panel helpers: the active-dictionary pick (document-language based,
- * task-board precedent) bound to the dsh-ssh interpolator in locales.ts, plus
+ * task-board precedent) bound to the SSH-ops interpolator in locales.ts, plus
  * a small error-message extractor. All copy stays in the locale dictionaries.
  */
 import { en, t, zh, type SshKey } from '../locales.ts'

@@ -128,7 +128,7 @@ describe('withSshConfig (stored entries override live ones)', () => {
   function view(entries: SshHostEntry[]) {
     const map = new Map(entries.map(entry => [entry.alias, entry]))
     return {
-      path: '/tmp/dsh-ssh.json',
+      path: '/tmp/dsh-hardssh-ssh.json',
       list: () => [...map.values()],
       find: (alias: string) => map.get(alias),
       summarize: (entry: SshHostEntry) => ({ alias: entry.alias, host: entry.host }),

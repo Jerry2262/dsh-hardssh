@@ -1,6 +1,6 @@
 /**
  * Locale dictionaries for the dsh-hardssh surface (zh/en).
- * The key union derives from the zh dictionary (mirrors the dsh-ssh locale
+ * The key union derives from the zh dictionary (mirrors the SSH-ops locale
  * pattern), so the LocaleNamespaceMap augmentation types the `t` seat and
  * the register call against exactly the shipped keys.
  */

@@ -2,7 +2,7 @@
  * Session secret dialog (VSCode Remote-SSH style): shown when a connection
  * needs a password/passphrase that the user hasn't entered this session
  * (secretStorage='none' → secrets are never persisted). The credential is
- * sent once to the host via /api/dsh-ssh/session-secret, held in the engine's
+ * sent once to the host via /api/dsh-hardssh/ssh/session-secret, held in the engine's
  * in-memory session table for the connection-pool lifetime, and dropped on
  * process exit. Nothing is written to disk.
  */

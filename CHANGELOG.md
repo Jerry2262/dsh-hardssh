@@ -4,6 +4,17 @@
 
 ## 未发布
 
+### 重命名：移除 `dsh-ssh` 历史命名（与官方 `@deepseek-ai/dsh-ssh` 去重）
+
+- 旧命名来自合并前的 SSH 运维插件；官方仓库另有同名的 `@deepseek-ai/dsh-ssh`（部署级 OpenSSH provider family），长期造成误认。本次保留全部 SSH 能力，只把本地标识改名：
+  - 设置命名空间 `dsh-ssh` → `dsh-hardssh`（当前无该命名空间的已保存设置，干净切换）。
+  - 路由 `/api/dsh-ssh/*` → `/api/dsh-hardssh/ssh/*`（host/client 共用 `SSH_API_BASE`；README/SECURITY 同步）。
+  - 主机配置 `~/.dsh/dsh-ssh.json` → `~/.dsh/dsh-hardssh-ssh.json`；vault `dsh-ssh-vault.json` → `dsh-hardssh-ssh-vault.json`。
+  - 客户端 locale 命名空间、system-prompt section（`plugin:dsh-hardssh-ssh`）、DOM id/name、上传暂存目录同步改名。
+- 数据迁移：`HostStore`/`Vault` 在默认路径构造时，若新文件不存在且旧文件存在，则以 tmp+rename 写入新路径（0600、目录 0700），成功后才删除旧文件；中断时源文件保留。旧文件名只保留在迁移辅助函数与对应测试里。
+- 验证：新增 `tests/ssh/legacy-migration.test.ts`（迁移 helper、目标已存在不覆盖、缺旧文件 no-op、默认路径构造触发迁移）；默认套件 777 通过 + 1 live skipped；构建通过。
+- 官方包名 `@deepseek-ai/dsh-ssh` 只保留在文档对比与上游观察里，本仓库不再把它当作自己的标识。
+
 ### 修复：SSH 工作区公告未说明 `bash` 也在远端执行
 
 - 现象：远端会话里模型先用 `ssh_exec` 探路，回答里把 bash 侧称作“本机”、并得出“远程工作区和本地执行环境是同一台”的错误结论；本地临时对比时两边答案不对称。

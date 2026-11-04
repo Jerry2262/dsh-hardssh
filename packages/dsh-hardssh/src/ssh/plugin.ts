@@ -1,8 +1,8 @@
 /**
  * The SSH operations capability, hosted inside dsh-hardssh: host config store
- * (~/.dsh/dsh-ssh.json), the shared ssh2 engine, /api/dsh-ssh routes, the
- * six ssh_* agent tools, the `dsh-ssh` settings namespace, and the SSH
- * system-prompt section.
+ * (~/.dsh/dsh-hardssh-ssh.json), the shared ssh2 engine, /api/dsh-hardssh/ssh
+ * routes, the six ssh_* agent tools, the `dsh-hardssh` settings namespace, and
+ * the SSH system-prompt section.
  *
  * This module deliberately does NOT create or dispose the engine/store:
  * ownership belongs to src/index.ts (one instance, one dispose point). It
@@ -20,9 +20,9 @@ import { makeRoutes } from './routes.ts'
 import { invalidateRemoteEnvironment } from '../remote/environment.ts'
 import { sshClusterTool, sshDownloadTool, sshExecTool, sshListTool, sshTunnelTool, sshUploadTool } from './tools.ts'
 
-/** Settings namespace of the SSH capability. Kept as 'dsh-ssh' so existing
- *  user settings survive the package merge unchanged. */
-export const SSH_SETTINGS_NAMESPACE = 'dsh-ssh'
+/** Settings namespace of the SSH capability. The legacy `dsh-ssh` name was
+ *  removed with the package merge; nothing reads the old namespace. */
+export const SSH_SETTINGS_NAMESPACE = 'dsh-hardssh'
 
 /** SSH-capability config, validated by the same-named schemastery schema.
  *  `secretStorage` is deliberately NOT a key here: the mode decides which
@@ -48,7 +48,7 @@ const DEFAULT_ANNOUNCE = true
 const SECTION_ORDER = 150
 
 /** Model-facing announcement: SSH operations capability, capabilities, limits. */
-export const SSH_GUIDANCE = '本机已安装 dsh-hardssh 插件（内建 DSH 远程 SSH 运维）：侧边栏「SSH」入口；SSH 运维与 SSH 工作区在 dsh-hardssh 中统一维护。能力：主机配置存 ~/.dsh/dsh-ssh.json（可从 ~/.ssh/config 导入）；持久连接池复用长连接（空闲 30 分钟自动断开）；ssh_list 列出主机、ssh_exec 执行远程命令、ssh_upload/ssh_download 传输文件、ssh_tunnel 本地端口转发（访问远程数据库/内网服务）、ssh_cluster 集群并发执行；支持密钥/密码认证、passphrase 密钥与 ProxyJump 跳板机；Web 终端走 WebSocket。限制：主机操作由用户在 GUI 中配置后 agent 方可使用；凭据默认不落盘（secretStorage=none 时仅存于本进程内存，按连接存活期复用、连接池回收即失效；secretStorage=vault 时以 AES-256-GCM 加密存于本机 vault 文件，`DSH_CREDENTIAL_PASSWORD` 自动解锁默认关闭，需 vaultAutoUnlock: env 显式开启）；命令输出与错误经过凭据脱敏（已揭示/会话内的密码会被替换），但仍可能含其它敏感信息；连接建立失败会自动重连，但命令或文件操作一旦提交就不会自动重试——结果不明确时应先核实远端状态，再决定是否人工重试；传输/执行消耗真实远程资源，先确认再操作。用户提到「SSH / 远程服务器 / 服务器操作 / 跳板机 / 隧道 / 部署 / 上传下载」时即指本插件，请据此协作。'
+export const SSH_GUIDANCE = '本机已安装 dsh-hardssh 插件（内建 DSH 远程 SSH 运维）：侧边栏「SSH」入口；SSH 运维与 SSH 工作区在 dsh-hardssh 中统一维护。能力：主机配置存 ~/.dsh/dsh-hardssh-ssh.json（可从 ~/.ssh/config 导入）；持久连接池复用长连接（空闲 30 分钟自动断开）；ssh_list 列出主机、ssh_exec 执行远程命令、ssh_upload/ssh_download 传输文件、ssh_tunnel 本地端口转发（访问远程数据库/内网服务）、ssh_cluster 集群并发执行；支持密钥/密码认证、passphrase 密钥与 ProxyJump 跳板机；Web 终端走 WebSocket。限制：主机操作由用户在 GUI 中配置后 agent 方可使用；凭据默认不落盘（secretStorage=none 时仅存于本进程内存，按连接存活期复用、连接池回收即失效；secretStorage=vault 时以 AES-256-GCM 加密存于本机 vault 文件，`DSH_CREDENTIAL_PASSWORD` 自动解锁默认关闭，需 vaultAutoUnlock: env 显式开启）；命令输出与错误经过凭据脱敏（已揭示/会话内的密码会被替换），但仍可能含其它敏感信息；连接建立失败会自动重连，但命令或文件操作一旦提交就不会自动重试——结果不明确时应先核实远端状态，再决定是否人工重试；传输/执行消耗真实远程资源，先确认再操作。用户提到「SSH / 远程服务器 / 服务器操作 / 跳板机 / 隧道 / 部署 / 上传下载」时即指本插件，请据此协作。'
 
 /** Shared instances the SSH surfaces run on. */
 export interface SshCapabilityDeps {
@@ -61,7 +61,7 @@ export interface SshCapabilityDeps {
   /** SSH-bound workspace record source (host-delete reference guard): the
    *  WorkspaceCore-backed projection store. */
   ledger?: import('../backend.ts').WorkspaceStoreView
-  /** Compatibility/degradation registry served by `/api/dsh-ssh/health`. */
+  /** Compatibility/degradation registry served by `/api/dsh-hardssh/ssh/health`. */
   health?: import('../runtime/health.ts').HardsshHealthRegistry
 }
 
@@ -69,7 +69,7 @@ export interface SshCapabilityDeps {
  * Mount the SSH operations surfaces (routes, tools, settings, prompt) against
  * the shared engine/store. Called from src/index.ts BEFORE the workspace
  * `enabled` early-return, so the SSH capability stays independently togglable
- * via its own `dsh-ssh` settings namespace.
+ * via its own `dsh-hardssh` settings namespace.
  */
 export function mountSshCapability(ctx: Context, deps: SshCapabilityDeps): void {
   const { store, engine } = deps
@@ -82,7 +82,7 @@ export function mountSshCapability(ctx: Context, deps: SshCapabilityDeps): void 
     }
   }
 
-  // The /api/dsh-ssh route family + terminal upgrade. Registered through a
+  // The /api/dsh-hardssh/ssh route family + terminal upgrade. Registered through a
   // dynamic webServer inject (headless profiles lack the service — mirroring
   // the workspace routes in src/index.ts). The enabled switch is honored at
   // registration time; toggling it later takes effect on reload.
@@ -141,7 +141,7 @@ export function mountSshCapability(ctx: Context, deps: SshCapabilityDeps): void 
       disposeTools = undefined
     }
     if (!value.enabled) {
-      deps.health?.set('sshTools', { state: 'degraded', reason: 'SSH capability is disabled in the dsh-ssh settings namespace' })
+      deps.health?.set('sshTools', { state: 'degraded', reason: 'SSH capability is disabled in the dsh-hardssh settings namespace' })
       return
     }
     if (value.announceToAgent) {
@@ -150,7 +150,7 @@ export function mountSshCapability(ctx: Context, deps: SshCapabilityDeps): void 
       const systemPrompt = ctx.get('systemPrompt') as { section?: (options: { name: string; order: number; text: string }) => () => void } | undefined
       if (typeof systemPrompt?.section === 'function') {
         disposeSection = systemPrompt.section({
-          name: 'plugin:dsh-ssh',
+          name: 'plugin:dsh-hardssh-ssh',
           order: SECTION_ORDER,
           text: SSH_GUIDANCE,
         })
@@ -161,7 +161,7 @@ export function mountSshCapability(ctx: Context, deps: SshCapabilityDeps): void 
         const disposers = tools.map(tool => ctx.tools.register(tool))
         return () => { for (const dispose of disposers) dispose() }
       },
-      'dsh-ssh: tools',
+      'dsh-hardssh-ssh: tools',
     )
     deps.health?.set('sshTools', { state: 'ready' })
   }
@@ -180,7 +180,7 @@ export function mountSshCapability(ctx: Context, deps: SshCapabilityDeps): void 
   }
   const settings = ctx.get('settings') as SettingsService | undefined
   if (settings?.installSection !== undefined) {
-    settings.installSection(ctx, 'dsh-ssh', SshConfig, {}, {
+    settings.installSection(ctx, 'dsh-hardssh', SshConfig, {}, {
       setSource: (source) => {
         current = source
         sync()

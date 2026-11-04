@@ -35,7 +35,7 @@ let xtermCssInjected = false
 function ensureXtermCss(): void {
   if (xtermCssInjected || typeof document === 'undefined') return
   xtermCssInjected = true
-  if (document.querySelector('style[data-dsh-ssh-xterm]') !== null) return
+  if (document.querySelector('style[data-dsh-hardssh-xterm]') !== null) return
   const style = document.createElement('style')
   style.dataset.dshSshXterm = ''
   style.textContent = XTERM_CSS

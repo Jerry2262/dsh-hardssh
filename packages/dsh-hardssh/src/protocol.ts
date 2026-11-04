@@ -90,7 +90,7 @@ export interface SshWorkspaceRecord {
   id: string
   /** Display title (sidebar). */
   title: string
-  /** SSH host alias (dsh-ssh host store). */
+  /** SSH host alias (dsh-hardssh-ssh host store). */
   alias: string
   /** Resolved absolute remote root (the remote directory to operate in). */
   remoteRoot: string

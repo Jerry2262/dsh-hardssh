@@ -7,9 +7,8 @@
  * CSS Modules inlined with auto-injected <style data-plugin>). The client
  * entry is auto-detected at src/client/index.ts by the preset.
  *
- * The host half owns the SSH engine/store internally (src/ssh/ — merged from
- * the legacy dsh-ssh package); ssh2/ws stay external install
- * dependencies resolved from package.json at runtime.
+ * The host half owns the SSH engine/store internally (src/ssh/); ssh2/ws stay
+ * external install dependencies resolved from package.json at runtime.
  */
 import { clientBundle } from './tsdown.client.ts'
 

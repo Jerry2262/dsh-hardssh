@@ -1,12 +1,12 @@
 /**
- * Host config store: one JSON file (`~/.dsh/dsh-ssh.json`) holding every
- * SSH host entry, written atomically (tmp + rename). Also parses the user's
- * standard `~/.ssh/config` for one-shot import. Secrets (passwords,
+ * Host config store: one JSON file (`~/.dsh/dsh-hardssh-ssh.json`) holding
+ * every SSH host entry, written atomically (tmp + rename). Also parses the
+ * user's standard `~/.ssh/config` for one-shot import. Secrets (passwords,
  * passphrases) live in this user-owned file in plaintext — same trust model
  * as ssh-skill's annotated ssh-config comments; document it, never log it.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { dshHomePath } from '../dsh-home.ts'
@@ -17,9 +17,48 @@ import { readSshConfig, sshConfigPath } from './ssh-config.ts'
 /** File format version. */
 const FORMAT_VERSION = 1
 
-/** Store file location: <home>/.dsh/dsh-ssh.json. */
+/** Current store file name. */
+const STORE_FILE = 'dsh-hardssh-ssh.json'
+
+/** Pre-rename store file name, migrated once on first load. */
+const LEGACY_STORE_FILE = 'dsh-ssh.json'
+
+/** Store file location: <home>/.dsh/dsh-hardssh-ssh.json. */
 export function storePath(): string {
-  return dshHomePath('dsh-ssh.json')
+  return dshHomePath(STORE_FILE)
+}
+
+/** Pre-rename store location; only read to migrate the old file. */
+export function legacyStorePath(): string {
+  return dshHomePath(LEGACY_STORE_FILE)
+}
+
+/**
+ * Move the pre-rename host store into place exactly once.
+ *
+ * The target wins when both exist; an absent legacy file is a no-op. The new
+ * file is written through a tmp file plus rename with mode 0600, and the old
+ * file is removed only after that rename succeeds, so an interrupted migration
+ * leaves the source intact.
+ *
+ * @param target - destination path (defaults to the standard location).
+ * @param legacy - source path (defaults to the pre-rename location).
+ * @returns whether a migration happened.
+ */
+export function migrateLegacyStoreFile(target = storePath(), legacy = legacyStorePath()): boolean {
+  if (resolve(target) === resolve(legacy)) return false
+  if (existsSync(target) || !existsSync(legacy)) return false
+  const tmp = `${target}.migrate-${process.pid}`
+  try {
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
+    writeFileSync(tmp, readFileSync(legacy), { mode: 0o600 })
+    renameSync(tmp, target)
+    unlinkSync(legacy)
+    return true
+  } catch {
+    try { unlinkSync(tmp) } catch { /* best effort */ }
+    return false
+  }
 }
 
 /** The user's standard OpenSSH config path — owned by the ssh-config reader so
@@ -183,6 +222,7 @@ export class HostStore {
   constructor(path?: string, sshConfigOverride?: string) {
     this.path = resolve(path ?? storePath())
     this.sshConfigOverride = sshConfigOverride
+    if (path === undefined) migrateLegacyStoreFile(this.path)
   }
 
   /** Load all entries (empty store when the file is absent). */

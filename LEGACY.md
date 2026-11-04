@@ -8,23 +8,18 @@
 
 状态图例：`待决策`（等你拍板）/ `待办`（已确认要做）/ `已接受`（知道风险，暂不处理）/ `防回归`（已修复，保留原因防止重犯）/ `观察`（上游方向，暂不行动）。
 
-## 1. `dsh-ssh` 旧命名空间（历史包袱，待决策）
+## 1. `dsh-ssh` 旧命名空间（已解决，防回归）
 
-**状态：待决策（改名方案已给出，等你确认）**
+**状态：防回归（2026-11-04 完成改名；旧的 `dsh-ssh` 标识已从代码/文档/数据路径移除）**
 
-- **现状**：代码里有 73 处 `dsh-ssh` 字样、20 个文件，集中在三处：
-  - 设置命名空间 `SSH_SETTINGS_NAMESPACE = 'dsh-ssh'`（[src/ssh/plugin.ts](packages/dsh-hardssh/src/ssh/plugin.ts) 第 25 行），设置界面用 `settings.installSection(ctx, 'dsh-ssh', …)`（同文件第 183 行）。
-  - 路由前缀 `/api/dsh-ssh/*`（[src/ssh/routes.ts](packages/dsh-hardssh/src/ssh/routes.ts) 第 2、280、293 行；client 侧 [src/client/ssh/api.ts](packages/dsh-hardssh/src/client/ssh/api.ts)）。
-  - 数据文件：主机配置 `~/.dsh/dsh-ssh.json`（[src/ssh/store.ts](packages/dsh-hardssh/src/ssh/store.ts) 第 20-22 行）、vault `~/.dsh/ssh-secrets/dsh-ssh-vault.json`（[src/ssh/vault.ts](packages/dsh-hardssh/src/ssh/vault.ts) 第 108-110 行）。主服务与测试服务 home 下各有一份 402 字节的 `dsh-ssh.json`（含 aliyun 主机配置，改名前必须迁移）。
-- **来源**：合并前的旧 SSH 运维插件；[src/ssh/plugin.ts](packages/dsh-hardssh/src/ssh/plugin.ts) 第 23-25 行注释写明「Kept as 'dsh-ssh' so existing user settings survive the package merge unchanged」。本仓库历史里从未有过 `packages/dsh-ssh`，profile bundles 里也只有 `@tiphareth/dsh-hardssh`，`cordis.patch.yml` 没有 dsh-ssh 行。
-- **与官方包重名但无关**：DSH 官方仓库确实有 [packages/ssh/ssh](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/ssh/ssh)，包名 `@deepseek-ai/dsh-ssh`（0.2.2-alpha.3，描述「Shared OpenSSH connection and versioned POSIX remote helper」），配套 `dsh-fs-ssh` / `dsh-subprocess-ssh` / `dsh-sandbox-ssh` / `ssh-helper-runtime`。它是**部署级 provider**：一个部署时固定的 OpenSSH alias，需要远端预装 helper 并校验 digest，提供 fs/subprocess/sandbox 接口，**没有模型可见的 SSH 工具、没有主机管理/工作区 UI、单连接非重连**；官方文档还说明 Web workspace 视图仍假设本地文件系统。当前安装的 DSH `0.2.1-rc.5` 依赖里没有任何 ssh 包，官方 ssh 家族属于 0.2.2-alpha 线，未进入本部署。
-- **影响**：用户（和你）会把它误认成官方插件；文档/设置/报错里出现 `dsh-ssh` 时无法一眼区分是本地旧命名空间还是官方 provider 家族。
-- **建议方案**（待确认）：保留 SSH 能力，只改名——
-  1. 设置命名空间 `dsh-ssh` → `dsh-hardssh`（当前没有已保存的该命名空间设置，可干净切换）。
-  2. 路由 `/api/dsh-ssh/*` → `/api/dsh-hardssh/ssh/*`（host/client 两侧 + 测试 + README 同步）。
-  3. 主机文件 `~/.dsh/dsh-ssh.json` → `~/.dsh/dsh-hardssh-ssh.json`，vault 同理；读取时新文件不存在则从旧文件迁移，**不能丢 aliyun 配置**。
-  4. 文档与 UI 文案把「dsh-ssh」替换掉，并注明与官方 `@deepseek-ai/dsh-ssh` 无关。
-- **备选**：不改名，只在 README 注明两者无关；成本低，但每次看到这个名字仍要解释一遍。
+- **曾经的问题**：设置命名空间、路由前缀、数据文件名都叫 `dsh-ssh`，来自合并前的旧 SSH 运维插件（[src/ssh/plugin.ts](packages/dsh-hardssh/src/ssh/plugin.ts) 历史注释「Kept as 'dsh-ssh' so existing user settings survive the package merge unchanged」）；而 DSH 官方仓库确实有 [packages/ssh/ssh](https://github.com/deepseek-ai/deepseek-harness/tree/master/packages/ssh/ssh)，包名就是 `@deepseek-ai/dsh-ssh`（0.2.2-alpha.3，部署级 OpenSSH provider family，配套 fs-ssh / subprocess-ssh / sandbox-ssh / ssh-helper-runtime，没有模型工具、没有 UI、单连接静态配置）。两者无关却同名，容易误认。
+- **现在的名字**：
+  - 设置命名空间：`dsh-hardssh`。
+  - 路由：`/api/dsh-hardssh/ssh/*`（host/client 共用 `SSH_API_BASE` 常量）。
+  - 主机配置：`~/.dsh/dsh-hardssh-ssh.json`；vault：`~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`。
+  - 客户端 locale 命名空间 `dsh-hardssh-ssh`；system-prompt section `plugin:dsh-hardssh-ssh`；DOM id/name 与临时暂存目录同步改名。
+- **迁移**：`HostStore` / `Vault` 在默认路径构造时各调一次 `migrateLegacyStoreFile` / `migrateLegacyVaultFile`：新文件已存在或旧文件不存在则不动；否则 tmp + rename 写入新路径（0600，目录 0700），成功后才删除旧文件（中断时源文件保留）。旧的 `~/.dsh/dsh-ssh.json`、`dsh-ssh-vault.json` 首次加载后自动消失，主机配置（aliyun）不丢。测试：`tests/ssh/legacy-migration.test.ts`。
+- **注意**：只有迁移辅助函数和对应测试里还允许出现旧文件名（作为源路径）；其他新代码不得再引入 `dsh-ssh`。官方包名 `@deepseek-ai/dsh-ssh` 只允许出现在文档的对比说明里。
 
 ## 2. 权限与沙箱遗留
 

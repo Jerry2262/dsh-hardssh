@@ -18,7 +18,7 @@ export function queryParam(url: URL, name: string): string | undefined {
   return value === null ? undefined : value
 }
 
-/** Loopback literal check plus browser same-origin markers (mirrors dsh-ssh). */
+/** Loopback literal check plus browser same-origin markers (mirrors the SSH routes). */
 export function isLoopbackRequest(request: IncomingMessage): boolean {
   const address = request.socket.remoteAddress
   if (address !== '127.0.0.1' && address !== '::1' && address !== '::ffff:127.0.0.1') return false

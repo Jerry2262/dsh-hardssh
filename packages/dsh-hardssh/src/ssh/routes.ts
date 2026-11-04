@@ -1,5 +1,5 @@
 /**
- * The /api/dsh-ssh route family: host CRUD, exec, cluster, SFTP transfer
+ * The /api/dsh-hardssh/ssh route family: host CRUD, exec, cluster, SFTP transfer
  * (NDJSON progress stream for uploads, binary stream for downloads), remote
  * listing, tunnels, and the WebSocket PTY terminal upgrade. Every route
  * carries a loopback-only trust fence (plus browser same-origin markers) —
@@ -261,7 +261,7 @@ export interface SshRoutesDeps {
   engine: SshEngine
   /** Host-key trust store (TOFU); absent → host-key verification disabled. */
   knownHosts?: KnownHostsStore
-  /** Credential vault (optional; enables /api/dsh-ssh/vault endpoints). */
+  /** Credential vault (optional; enables /api/dsh-hardssh/ssh/vault endpoints). */
   vault?: import('./vault.ts').Vault
   /** SSH-bound workspace record source (host-delete reference check). */
   ledger?: import('../backend.ts').WorkspaceStoreView
@@ -277,7 +277,7 @@ export interface SshRoutesDeps {
   health?: { snapshot: () => import('./protocol.ts').HardsshHealthSnapshot }
 }
 
-/** Every /api/dsh-ssh route plus the terminal upgrade, owned by one call. */
+/** Every /api/dsh-hardssh/ssh route plus the terminal upgrade, owned by one call. */
 export interface SshRoutes {
   routes: WebRoute[]
   upgrade: WebUpgradeRoute
@@ -290,7 +290,7 @@ export interface SshRoutes {
 }
 
 /**
- * Build every /api/dsh-ssh route (exact paths) plus the terminal upgrade.
+ * Build every /api/dsh-hardssh/ssh route (exact paths) plus the terminal upgrade.
  * @param deps - store, engine, staging dir.
  * @returns routes, the upgrade route, and this instance's disposer.
  */
@@ -301,7 +301,7 @@ export function makeRoutes(deps: SshRoutesDeps): SshRoutes {
   const redact = typeof engine.redact === 'function' ? (text: string): string => engine.redact(text) : (text: string): string => text
   const safeMessage = (error: unknown): string => redact(error instanceof Error ? error.message : String(error))
   const safeErrorBody = (error: unknown): ApiErrorBody => errorBody(error, redact)
-  const staging = deps.stagingDir ?? join(tmpdir(), 'dsh-ssh-uploads')
+  const staging = deps.stagingDir ?? join(tmpdir(), 'dsh-hardssh-ssh-uploads')
   const uploadLimitBytes = deps.uploadLimitBytes ?? DEFAULT_MAX_UPLOAD_BYTES
   if (!Number.isSafeInteger(uploadLimitBytes) || uploadLimitBytes < 0) {
     throw new RangeError('uploadLimitBytes must be a non-negative safe integer')

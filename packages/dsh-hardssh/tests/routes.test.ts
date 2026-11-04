@@ -2,7 +2,7 @@
  * Route-layer tests for the Phase-7 generic assembly: the /api/dsh-hardssh
  * workspace CRUD surface is driven by the generic WorkspaceCore-backed store
  * (client DTO projection — id/title/alias/remoteRoot/anchorPath/createdAt),
- * and the /api/dsh-ssh host-delete reference guard reads that same generic
+ * and the /api/dsh-hardssh/ssh host-delete reference guard reads that same generic
  * record source.
  */
 

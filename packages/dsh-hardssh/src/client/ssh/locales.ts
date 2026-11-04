@@ -1,5 +1,5 @@
 /**
- * dsh-ssh surface copy: zh is the key source, en mirrors every key.
+ * SSH operations surface copy: zh is the key source, en mirrors every key.
  */
 
 export const zh = {

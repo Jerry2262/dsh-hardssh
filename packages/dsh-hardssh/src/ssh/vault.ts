@@ -105,9 +105,48 @@ export function vaultDirectory(): string {
   return dshHomePath('ssh-secrets')
 }
 
-/** Vault file location: <home>/.dsh/ssh-secrets/dsh-ssh-vault.json. */
+/** Current vault file name. */
+const VAULT_FILE = 'dsh-hardssh-ssh-vault.json'
+
+/** Pre-rename vault file name, migrated once on first load. */
+const LEGACY_VAULT_FILE = 'dsh-ssh-vault.json'
+
+/** Vault file location: <home>/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json. */
 export function vaultPath(): string {
-  return join(vaultDirectory(), 'dsh-ssh-vault.json')
+  return join(vaultDirectory(), VAULT_FILE)
+}
+
+/** Pre-rename vault location; only read to migrate the old file. */
+export function legacyVaultPath(): string {
+  return join(vaultDirectory(), LEGACY_VAULT_FILE)
+}
+
+/**
+ * Move the pre-rename vault into place exactly once.
+ *
+ * The target wins when both exist; an absent legacy file is a no-op. The new
+ * file is written through a tmp file plus rename with mode 0600, and the old
+ * file is removed only after that rename succeeds, so an interrupted migration
+ * leaves the source intact.
+ *
+ * @param target - destination path (defaults to the standard location).
+ * @param legacy - source path (defaults to the pre-rename location).
+ * @returns whether a migration happened.
+ */
+export function migrateLegacyVaultFile(target = vaultPath(), legacy = legacyVaultPath()): boolean {
+  if (target === legacy) return false
+  if (existsSync(target) || !existsSync(legacy)) return false
+  const tmp = `${target}.migrate-${process.pid}`
+  try {
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 })
+    writeFileSync(tmp, readFileSync(legacy), { mode: 0o600 })
+    renameSync(tmp, target)
+    unlinkSync(legacy)
+    return true
+  } catch {
+    try { unlinkSync(tmp) } catch { /* best effort */ }
+    return false
+  }
 }
 
 /** AAD for one entry. */
@@ -193,6 +232,7 @@ export class Vault {
   ) {
     this.path = filePath ?? vaultPath()
     this.allowEnvUnlock = options?.allowEnvUnlock === true
+    if (filePath === undefined) migrateLegacyVaultFile(this.path)
     this.load()
     // Opt-in auto-unlock from DSH_CREDENTIAL_PASSWORD (headless / unattended
     // agents that deliberately enable it).

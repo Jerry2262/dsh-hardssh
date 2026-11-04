@@ -1,8 +1,7 @@
 /**
- * SSH operations browser surfaces, hosted inside dsh-hardssh's client bundle
- * (the SSH operations surfaces contributed by dsh-ssh): the 'dsh-ssh' locale
- * dictionaries and the SSH operations console mounted as a RIGHT-Sidebar page
- * tab.
+ * SSH operations browser surfaces, hosted inside dsh-hardssh's client bundle:
+ * the 'dsh-hardssh-ssh' locale dictionaries and the SSH operations console
+ * mounted as a RIGHT-Sidebar page tab.
  *
  * Nothing here touches the DOM. The old build injected a sidebar row and a
  * panel container by selector, which the 0.1.5 shell no longer renders — the
@@ -18,13 +17,13 @@ import { en, zh } from './locales.ts'
 import { registerOperationsTab } from './ops-tab.tsx'
 import type { SessionSshTargetSource } from './session-target.ts'
 
-/** Locale namespace this capability owns (kept as 'dsh-ssh'). */
-export const NS = 'dsh-ssh'
+/** Locale namespace this capability owns. */
+export const NS = 'dsh-hardssh-ssh'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
-    /** dsh-ssh surface copy (now inside dsh-hardssh). */
-    'dsh-ssh': import('./locales.ts').SshKey
+    /** dsh-hardssh SSH-operations surface copy. */
+    'dsh-hardssh-ssh': import('./locales.ts').SshKey
   }
 }
 
@@ -43,7 +42,7 @@ export function mountSshOperations(
     registerOperationsTab(ctx, api, target)
   } catch (error) {
     // A wiring failure degrades the SSH operations tab only, never the GUI.
-    console.warn('[dsh-ssh] operations tab registration failed:', error)
+    console.warn('[dsh-hardssh-ssh] operations tab registration failed:', error)
   }
-  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-ssh: dictionaries')
+  ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-hardssh-ssh: dictionaries')
 }

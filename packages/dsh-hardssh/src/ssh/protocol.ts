@@ -22,7 +22,7 @@ export interface SshCommandPolicy {
   hint?: string
 }
 
-/** One stored host entry (the ~/.dsh/dsh-ssh.json store shape). */
+/** One stored host entry (the ~/.dsh/dsh-hardssh-ssh.json store shape). */
 export interface SshHostEntry {
   /** Stable, user-chosen identifier used by every operation. */
   alias: string
@@ -242,7 +242,7 @@ export interface HardsshHealthSnapshot {
 }
 
 /** Route paths the client calls (shared literals). */
-export const SSH_API_BASE = '/api/dsh-ssh' as const
+export const SSH_API_BASE = '/api/dsh-hardssh/ssh' as const
 
 export const SSH_API = {
   hosts: SSH_API_BASE + '/hosts',

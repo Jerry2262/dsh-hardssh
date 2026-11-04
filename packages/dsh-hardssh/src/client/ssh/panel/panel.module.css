@@ -1,5 +1,5 @@
 /**
- * dsh-ssh operations console styles. Scoped by the plugin's own class names so
+ * SSH operations console styles. Scoped by the plugin's own class names so
  * nothing leaks into the rest of the GUI; colors ride the dsh --dsw-* tokens so
  * the console follows the active theme (light/dark and skins).
  *

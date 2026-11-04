@@ -120,7 +120,7 @@ dsh plugin --profile web add link:</path/to/dsh-hardssh>/packages/dsh-hardssh
 
 ### 桌面版（Electron）dsh
 
-官方桌面版**可以正常加载本插件**（0.2.1-rc.5 实测：插件激活、`/api/dsh-ssh/*` 与 `/api/dsh-hardssh/*` 路由、工作区注册进官方 `ctx.workspace` 均正常）。但它的 profile 有两条特殊规则，装法与其他版本不同：
+官方桌面版**可以正常加载本插件**（0.2.1-rc.5 实测：插件激活、`/api/dsh-hardssh/ssh/*` 与 `/api/dsh-hardssh/*` 路由、工作区注册进官方 `ctx.workspace` 均正常）。但它的 profile 有两条特殊规则，装法与其他版本不同：
 
 1. **普通 CLI 不能管理桌面版的 `desktop` profile**——`dsh plugin --profile desktop …` 会被直接拒绝：
    ```
@@ -162,7 +162,7 @@ SSH 工作区的 `bash` 在远端执行时，文件写入必须由执行侧的�
 
 - **内核侧契约**：插件实际使用的运行时导出（`FileSystem`/`FsError`/`SubprocessRuntime`/`SandboxedFileSystem`/`defineTool` 等）都由 `src/runtime/compat-contract.ts` 列明，并在测试里逐个 import 校验；`peerDependencies` 不再使用无边界 `"*"`。
 - **可选集成**：`settings` / `systemPrompt` / `webServer` / 客户端 slot 缺失时**降级而不是失败**——插件照常加载，只是少了对应界面。
-- **可见状态**：`GET /api/dsh-ssh/health` 返回各功能面（SSH 工具、工作区运行时、文件路由、命令路由）的 `ready/degraded/failed`；非 ready 时工作区面板顶部会显示横幅说明原因。
+- **可见状态**：`GET /api/dsh-hardssh/ssh/health` 返回各功能面（SSH 工具、工作区运行时、文件路由、命令路由）的 `ready/degraded/failed`；非 ready 时工作区面板顶部会显示横幅说明原因。
 - **seam 失败不会拖垮宿主**：工作区运行时初始化失败时，替换行仍挂载本地后端（本机读写与命令继续可用），管理锚点窗口继续 fail closed；`ssh_*` 运维能力独立存活。
 - **远端路径规范化不依赖 GNU 工具**：`workspace.fs` 的路径解析改走协议级 SFTP `realpath`（缺失叶子按「最近已存在祖先 + 后缀」逐级解析），不再执行 `realpath -mz … | base64 -w0`，BSD/macOS、BusyBox 主机不会仅因缺少 GNU `realpath -m/-z` 就整条路径解析失败。
 - **远端搜索按实测能力分三级**：连接建立后探测一次该主机能用什么（`rg`、`find -printf`/`-mmin`、`grep -Z`/`--exclude-dir`、`mktemp`，**不猜 `uname`**），内容检索走 `rg` → POSIX `grep` → **SFTP 遍历**兜底，文件名/glob 走 POSIX `find` → SFTP 兜底；SFTP 兜底不执行任何远端命令，带深度/条数/字节预算并跳过 `.git`、`node_modules` 与符号链接目录。`remote_search` 支持 `syntax="fixed"`（默认）或 `"regex"`，正则需要主机有 `rg` 或 GNU `grep`，否则明确报错。
@@ -179,7 +179,7 @@ SSH 工作区的 `bash` 在远端执行时，文件写入必须由执行侧的�
 | Key | Type | Default | 含义 |
 | --- | --- | --- | --- |
 | `announceToAgent` | boolean | `true` | 是否向 agent 注入 SSH 系统提示与工具引导 |
-| `enabled` | boolean | `true` | **SSH 工作区界面开关**（不是插件总开关）。只控制本插件挂载的 SSH 工作区界面与工具：`/api/dsh-hardssh` 工作区 CRUD 路由、`remote_*` 工作区工具、工作区提示段落。SSH 运维能力（主机管理、`ssh_*` 工具、`/api/dsh-ssh`、Web 终端）由 `dsh-ssh` 设置命名空间的 `enabled` 单独控制；共享 engine/主机存储、fs/subprocess 路由 seam 与连接池不受它影响。 |
+| `enabled` | boolean | `true` | **SSH 工作区界面开关**（不是插件总开关）。只控制本插件挂载的 SSH 工作区界面与工具：`/api/dsh-hardssh` 工作区 CRUD 路由、`remote_*` 工作区工具、工作区提示段落。SSH 运维能力（主机管理、`ssh_*` 工具、`/api/dsh-hardssh/ssh`、Web 终端）由 `dsh-hardssh` 设置命名空间的 `enabled` 单独控制；共享 engine/主机存储、fs/subprocess 路由 seam 与连接池不受它影响。 |
 | `secretStorage` | enum | `none` | 凭据策略：`none` = 密码不落盘、连接时输入（VSCode Remote-SSH 式）；`vault` = 加密存储（供无人值守 agent）。**唯一来源是这里的插件配置**：Vault 与主机存储在插件加载时按它构造一次，因此改动后需重载插件/重启 `dsh web` 才生效。 |
 | `vaultAutoUnlock` | enum | `off` | 是否允许 Vault 在插件加载时用 `DSH_CREDENTIAL_PASSWORD` 环境变量**自动解锁**：`off`（默认，需手动输入主密码）或 `env`（无人值守场景显式开启）。该变量对同用户的任何进程可见，因此默认关闭。仅 `secretStorage: vault` 时相关。 |
 
@@ -200,7 +200,7 @@ SSH 工作区的 `bash` 在远端执行时，文件写入必须由执行侧的�
 
 ### 在哪里配
 
-两种等价方式（都写入 `~/.dsh/dsh-ssh.json` 的该主机条目）：
+两种等价方式（都写入 `~/.dsh/dsh-hardssh-ssh.json` 的该主机条目）：
 
 1. **GUI**：左侧「SSH 工作区」→ 该主机行的 ⚙（编辑服务器）→ 三个输入框：
    - 「禁止命令（每行一个正则）」
@@ -255,11 +255,11 @@ dsh-hardssh: 已阻止在 login-node 上执行该命令（命中该主机的禁�
 
 ## 数据位置
 
-- 主机配置：`~/.dsh/dsh-ssh.json`（含每主机的 `commandPolicy` 命令守卫，见上文）
+- 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（含每主机的 `commandPolicy` 命令守卫，见上文；首次启动会从旧的 `dsh-ssh.json` 自动迁移）
 - 通用工作区台账：`~/.dsh/workspaces/index.v1.json`
 - 工作区锚点目录：`~/.dsh/workspaces/anchors`
 - 主机密钥信任：`~/.dsh/ssh-known-hosts.json`
-- `vault` 模式的加密凭据：`~/.dsh/ssh-secrets/dsh-ssh-vault.json`（位于 `~/.dsh` 内，但被 fs seam 在所有派发路径上拒绝访问）
+- `vault` 模式的加密凭据：`~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`（位于 `~/.dsh` 内，但被 fs seam 在所有派发路径上拒绝访问；旧的 `dsh-ssh-vault.json` 会在首次加载时自动迁移）
 
 以上文件按系统权限（0600 / 0700）落盘。
 
@@ -284,7 +284,7 @@ pnpm test:vault                                  # 只跑 vault 加密用例（~
 
 项目级 skill 放在 `.dsh/skills/`（新会话启动时 DSH 会自动发现并把 description 注入上下文，按需加载全文）。当前有一个 `dsh-session-triage`：定位/解码/对比会话日志，含 `.dsh/skills/dsh-session-triage/scripts/` 下的多帧 zstd 解码与执行流摘要脚本，排查「某个会话为什么失败、两个 tmp 工作区执行流是否一致」时先用它。
 
-历史遗留问题、待决策项、已接受的风险和踩过的坑都记录在 [LEGACY.md](./LEGACY.md)；动 `dsh-ssh` 命名、权限语义或工具集之前先读一遍。
+历史遗留问题、待决策项、已接受的风险和踩过的坑都记录在 [LEGACY.md](./LEGACY.md)；动权限语义或工具集之前先读一遍。
 
 部署：profile 用 `link:` 指向本仓库，构建后重启 `dsh web` 即生效。
 
@@ -332,9 +332,9 @@ pnpm test:vault                                  # 只跑 vault 加密用例（~
 
 **操作台里为什么不能选服务器** —— 设计如此：操作台强制跟随当前会话所在的服务器，避免在同一面板里误操作到别的主机。要换服务器请切换会话。
 
-**密码存哪里** —— 默认不落盘；启用 `secretStorage: vault` 后加密存储于 `~/.dsh/ssh-secrets/dsh-ssh-vault.json`。该目录**就在 `~/.dsh` 里**（`~/.dsh` 是 fs seam 声明的本地根），因此靠的是**显式拒绝**而非位置：`deniedRoots` 在 `resolve` / `lstat` 以及所有按 target 派发的读写路径上都会拒绝访问它，旧路径 `~/.dsh/dsh-ssh-vault.json` 同样被拒绝。诚实地说：以同一用户身份在本机运行的命令（例如客户端 `pwsh`）仍能读到这个文件——真正的保护是**它是加密的**，且环境变量自动解锁默认关闭，需要 `vaultAutoUnlock: env` 显式开启，所以拿到的只是离线的 scrypt 目标而不是可用凭据。
+**密码存哪里** —— 默认不落盘；启用 `secretStorage: vault` 后加密存储于 `~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`。该目录**就在 `~/.dsh` 里**（`~/.dsh` 是 fs seam 声明的本地根），因此靠的是**显式拒绝**而非位置：`deniedRoots` 在 `resolve` / `lstat` 以及所有按 target 派发的读写路径上都会拒绝访问它。诚实地说：以同一用户身份在本机运行的命令（例如客户端 `pwsh`）仍能读到这个文件——真正的保护是**它是加密的**，且环境变量自动解锁默认关闭，需要 `vaultAutoUnlock: env` 显式开启，所以拿到的只是离线的 scrypt 目标而不是可用凭据。
 
-**怎么禁止 agent 在某台服务器上跑计算命令（例如登录节点）** —— 给该主机配 `commandPolicy`：GUI 里点该主机的 ⚙（编辑服务器），填「禁止命令名称」和「提示信息」，保存即生效；或直接编辑 `~/.dsh/dsh-ssh.json`。默认不拦截。详见「[主机命令守卫](#主机命令守卫可选)」——注意它是护栏而非沙箱。
+**怎么禁止 agent 在某台服务器上跑计算命令（例如登录节点）** —— 给该主机配 `commandPolicy`：GUI 里点该主机的 ⚙（编辑服务器），填「禁止命令名称」和「提示信息」，保存即生效；或直接编辑 `~/.dsh/dsh-hardssh-ssh.json`。默认不拦截。详见「[主机命令守卫](#主机命令守卫可选)」——注意它是护栏而非沙箱。
 
 **怎么让别的插件支持 SSH 工作区** —— 大多数插件零改动（走 seam）。少数需要改接口的，让 agent 读 [packages/dsh-hardssh/SKILLS.md](./packages/dsh-hardssh/SKILLS.md) 按手册适配。
 

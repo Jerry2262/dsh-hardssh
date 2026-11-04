@@ -1,6 +1,6 @@
 {
   // Host-half program (node process side): the mode store, backends, routes,
-  // and agent tools over the dsh-ssh engine. SDK types resolve from the
+  // and agent tools over the SSH engine. SDK types resolve from the
   // @deepseek-ai/* npm packages declared in devDependencies (official NPM
   // SDK), never from a source checkout.
   "compilerOptions": {

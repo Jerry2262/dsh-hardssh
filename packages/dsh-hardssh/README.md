@@ -2,7 +2,7 @@
 
 已适配 DSH **0.1.5 ~ 0.2.1，含官方桌面版（Electron）**（0.1.x 兼容矩阵四条线全绿：`0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`；0.2.x 线已在桌面版 `0.2.1-rc.5` / `0.2.0-rc.2` 上实测宿主侧与工作区注册；peer 范围 `>=0.1.5-rc.1 <0.1.7 || >=0.1.6-alpha.1`，对 0.2.x 不设上限；本包版本 `0.2.7`）。客户端 Windows / Linux / macOS 均可用（CI 在 Linux runner 上跑 Node 22.19 与 24 的完整套件；客户端路径、锚点与远端根之间的映射有专门的跨平台回归用例）。`~/.ssh/config` 会被实时读取（无需导入，插件从不改写该文件）；认证顺序固定为 key → agent → password。在 DSH Web GUI 中提供两块能力（单包单引擎）：
 
-1. **SSH 运维**：右侧栏「SSH」Tab（从右侧栏标签条的「+」或右侧栏引导页入口打开）→ Web 终端（xterm + WebSocket PTY）、文件上传下载、本地端口转发隧道、当前服务器的远端命令；`ssh_list` / `ssh_exec` / `ssh_upload` / `ssh_download` / `ssh_tunnel` / `ssh_cluster` 六个 Agent 工具；主机配置存 `~/.dsh/dsh-ssh.json`。
+1. **SSH 运维**：右侧栏「SSH」Tab（从右侧栏标签条的「+」或右侧栏引导页入口打开）→ Web 终端（xterm + WebSocket PTY）、文件上传下载、本地端口转发隧道、当前服务器的远端命令；`ssh_list` / `ssh_exec` / `ssh_upload` / `ssh_download` / `ssh_tunnel` / `ssh_cluster` 六个 Agent 工具；主机配置存 `~/.dsh/dsh-hardssh-ssh.json`。
 2. **SSH 工作区**：左侧侧栏的全局入口行 → 中央面板管理服务器与工作区（增删改查 / `~/.ssh/config` 导入）；绑定后本地 harness 的 fs/subprocess 经接缝门面透明路由到远程主机执行（read/write/edit/bash 在绑定会话中即远程操作）；`remote_*` 三个 Agent 工具（`remote_ls` / `remote_search` / `remote_status`）用于显式操作远端工作区。
 
 ## 核心优势
@@ -15,7 +15,7 @@
 
 - **单一共享实例**：`HostStore` + `SshEngine`（ssh2 连接池）在 `src/index.ts` 创建一次，SSH 运维与 SSH 工作区共用同一引擎 —— 配置变更（PATCH/DELETE）同时失效所有连接，无双池问题。
 - **接缝切换**：`cordis.patch.yml` 禁用部署自带的 `fs-sandbox` / `subprocess` 行，由 `dsh-hardssh/fs`、`dsh-hardssh/subprocess` 提供 provider 路由门面（本地 = 沙箱化原实现；远端 = 该 workspace 连接上的 `workspace.fs` / `workspace.process` capability）。
-- **REST**：`/api/dsh-ssh`（运维路由，loopback-only）+ `/api/dsh-hardssh`（工作区路由，loopback-only）。
+- **REST**：`/api/dsh-hardssh/ssh`（运维路由，loopback-only）+ `/api/dsh-hardssh`（工作区路由，loopback-only）。
 - **工作区核心服务**：`ctx.workspaceCore`（通用 WorkspaceCore：台账 + provider 路由 + capability 连接）是**唯一**的工作区运行时；`ctx.hardsshCore` 只保留 `hosts` + `engine` 供 SSH 专用集成消费（如四列 IDE 形态的 `dsh-workbench-tiphareth`）。
 - **公开入口**：`@tiphareth/dsh-hardssh/base`（通用底座实现）、`@tiphareth/dsh-hardssh/workspace`（平台无关类型面）。
 
@@ -49,11 +49,11 @@
 - **认证被拒立刻重弹并给出原因**：凭据已输入后服务器仍拒绝时，重新打开密码对话框并携带具体 SSH 错误，而不是落到非交互失败对话框。
 - **连接中可见**：连接期间左侧工作区徽章显示旋转指示器，状态翻转原地替换。
 - **工作区文件面板显示远端地址**：面板根锚在本机（会话 cwd），内容已经是远端、地址与面包屑也重写为远端根，避免「地址是本机、内容是服务器」的错觉。
-- **状态徽章只读**：左侧面板每 3 秒读取 `/api/dsh-ssh/connections`（连接池 live alias 列表）刷新「已连接 / 未连接」徽章，**不会**主动拨号。
+- **状态徽章只读**：左侧面板每 3 秒读取 `/api/dsh-hardssh/ssh/connections`（连接池 live alias 列表）刷新「已连接 / 未连接」徽章，**不会**主动拨号。
 
 ## 主机命令守卫（可选，默认不拦截）
 
-面向「登录节点禁止直接计算」这类主机策略：**默认什么都不拦**，只有给某台主机配了 `commandPolicy` 才生效。配置写在 `~/.dsh/dsh-ssh.json` 的单台主机条目里，也可以在「新建/编辑服务器」对话框里填：
+面向「登录节点禁止直接计算」这类主机策略：**默认什么都不拦**，只有给某台主机配了 `commandPolicy` 才生效。配置写在 `~/.dsh/dsh-hardssh-ssh.json` 的单台主机条目里，也可以在「新建/编辑服务器」对话框里填：
 
 ```jsonc
 {
@@ -122,12 +122,12 @@ pnpm --filter dsh-hardssh build       # 产出 lib/（构建前先清空，避�
 
 ## 安全模型
 
-- `/api/dsh-ssh/*` 与 `/api/dsh-hardssh/*` 仅限 loopback（含同源校验）。
-- 认证材料沿用 `~/.dsh/dsh-ssh.json`（0600 / 0700），不新增存储。
+- `/api/dsh-hardssh/ssh/*` 与 `/api/dsh-hardssh/*` 仅限 loopback（含同源校验）。
+- 认证材料沿用 `~/.dsh/dsh-hardssh-ssh.json`（0600 / 0700），不新增存储。
 - 路径 gate：远程操作 root 必须等于 resolved remoteRoot；相对路径禁止 `..`；`workspace.fs` / `workspace.process` capability 在解析后的 canonical 路径上再做一次 root 收敛（symlink 逃逸 fail closed）。
 - 远程操作消耗真实远程资源：工具描述与宣告段明确「先确认再执行」；`remote_search` 有深度与条数上限；`glob` / `grep` 在 SSH 会话里由搜索桥代答（同一条 ripgrep argv，或搜索阶梯），不会把本机结果冒充服务器内容——宿主机既无 rg 也无 GNU grep 时，正则检索明确报错而不是把正则当字面量搜。
 - 客户端路径不会被当成服务器路径：绑定会话的 cwd 是本机锚点目录，两个 seam 在派发前把它映射到工作区远端根（`src/switch/anchor-path.ts`）；根之外的**词法**越界按 `FS_NOT_FOUND` 作答，使 `dsh-agent-instructions` 从会话 cwd 向上找项目根的探测能继续走，而符号链接逃逸仍按 `FS_IO_ERROR` fail closed。
 - SSH 模式下本机沙箱不对远程执行生效（远程进程无法被本地内核沙箱约束）：门面的 `sandboxMode` 委托本地后端的真实模式（`write` / `edit` 的沙箱升级入口据此注册），而远端世界的升级策略在门面处**显式丢弃**。
-- 凭据默认不落盘；`secretStorage: vault` 时以 AES-256-GCM + scrypt 加密存储于 `~/.dsh/ssh-secrets/dsh-ssh-vault.json`（被 fs seam 拒绝访问），且 `DSH_CREDENTIAL_PASSWORD` 自动解锁默认关闭（需 `vaultAutoUnlock: env`）。会话密码按**连接存活期**复用，连接池回收即失效。
+- 凭据默认不落盘；`secretStorage: vault` 时以 AES-256-GCM + scrypt 加密存储于 `~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`（被 fs seam 拒绝访问），且 `DSH_CREDENTIAL_PASSWORD` 自动解锁默认关闭（需 `vaultAutoUnlock: env`）。会话密码按**连接存活期**复用，连接池回收即失效。
 
 完整的信任边界、能力清单，以及静态扫描命中项（`exec` 方法名、`child_process`、私钥路径字面量等）的逐条说明见仓库根目录的 [SECURITY.md](https://github.com/tiphareth0/dsh-hardssh/blob/master/SECURITY.md)。

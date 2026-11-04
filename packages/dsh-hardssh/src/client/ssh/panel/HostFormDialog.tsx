@@ -197,11 +197,11 @@ export function HostFormDialog({ api, editing, onClose, onSaved }: HostFormDialo
           <span className={css.fieldLabel}>{tt('form.auth')}</span>
           <div className={css.radioRow}>
             <label className={css.radioLabel}>
-              <input type="radio" name="dsh-ssh-auth" checked={form.authKind === 'key'} onChange={() => { set('authKind', 'key') }} />
+              <input type="radio" name="dsh-hardssh-auth" checked={form.authKind === 'key'} onChange={() => { set('authKind', 'key') }} />
               {tt('form.auth.key')}
             </label>
             <label className={css.radioLabel}>
-              <input type="radio" name="dsh-ssh-auth" checked={form.authKind === 'password'} onChange={() => { set('authKind', 'password') }} />
+              <input type="radio" name="dsh-hardssh-auth" checked={form.authKind === 'password'} onChange={() => { set('authKind', 'password') }} />
               {tt('form.auth.password')}
             </label>
           </div>

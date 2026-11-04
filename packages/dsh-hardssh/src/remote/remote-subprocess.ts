@@ -1,7 +1,7 @@
 /**
  * Remote subprocess provider for the `ctx.subprocess` capability seam: each
  * spawn opens a streaming exec channel (or a PTY for terminals) on the
- * current SSH-mode host through the dsh-ssh engine; output spill files stay
+ * current SSH-mode host through the SSH engine; output spill files stay
  * on the local host. Ported from UynajGI/dsh-ssh (MIT).
  *
  * @module dsh-hardssh/remote-subprocess
