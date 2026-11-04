@@ -4,6 +4,16 @@
 
 ## 未发布
 
+### 定位收窄：删除多主机 SSH 运维面，只保留「远端目录 = 工作区」
+
+- 与官方 `@deepseek-ai/dsh-ssh` 的单远端世界不同，本插件保留按会话绑定远端工作区的透明路由，但不再同时承担多主机运维：一个会话只感知当前工作区对应的那一台主机。
+- 删除 6 个 `ssh_*` 工具（list/exec/upload/download/tunnel/cluster）与 3 个 `remote_*` 工具（status/ls/search）；删除 SSH 运维系统提示段落与 `dsh-hardssh` 设置命名空间（配置只保留插件 Config 的 `enabled`/`announceToAgent`/`secretStorage`/`vaultAutoUnlock`）。
+- 删除运维 HTTP 面：`exec` / `cluster` / `upload` / `download` / `tunnel` / `terminal`（含 WebSocket 升级）；客户端删除右侧「SSH 运维」Tab、终端/传输/隧道/集群面板及 `@xterm/*`、`ws` 依赖。
+- 保留工作区创建/连接所需的最小面：hosts CRUD、ssh-config 导入、known-hosts、vault、session-secret、connections、test、远端目录 `ls`。这些路由不进 agent 上下文，也不注册模型工具。
+- 删除内部实现：`TunnelService`、`engine.cluster`、`engine.download`、`manager.cluster`、`src/ssh/tunnel/`、协议里的 cluster/tunnel/terminal/transfer-stream 类型；`commandPolicy` 守卫收窄为 `bash` 工具层 + subprocess seam。
+- 公告改为只描述当前工作区（远端目录、bash 在远端、写入受远端 Landlock 约束），不再出现任何 `ssh_*` / `remote_*` 名称。
+- 测试：删除工具/运维路由/终端/隧道/集群用例，新增核心挂载回归（只注册 9 条连接配置路由、无 terminal upgrade）与公告回归（不含 `ssh_*` / `remote_*` 工具名）；默认套件 **667 通过 + 1 skipped**（live SSH opt-in），typecheck/build 通过。
+
 ### 重命名：移除 `dsh-ssh` 历史命名（与官方 `@deepseek-ai/dsh-ssh` 去重）
 
 - 旧命名来自合并前的 SSH 运维插件；官方仓库另有同名的 `@deepseek-ai/dsh-ssh`（部署级 OpenSSH provider family），长期造成误认。本次保留全部 SSH 能力，只把本地标识改名：

@@ -25,22 +25,21 @@
 
 **状态：待决策 / 已接受混合**
 
-- `ssh_exec` / `ssh_cluster` 不经过 session 的权限 preset（SandboxExecutionPolicy）。它们走独立 SSH 连接，只受每主机 `commandPolicy`（护栏，不是沙箱）约束；而绑定会话里的 `bash` 走远端 Landlock（`read-only` / `workspace-write` 生效）。两套远程命令通道的权限语义不一致。**待决策**：是否把这两个工具也纳入 preset，或明确只把它们当运维通道。
+- SSH 绑定会话里的 `bash` 走远端 Landlock（`read-only` / `workspace-write` 生效）；但远端 subprocess seam 本身可被其它插件消费，Landlock 是否覆盖取决于远端执行器本身（本插件自动部署的 `landlock-run` 覆盖 routed bash/子进程路径）。`commandPolicy` 只是护栏，不是沙箱。**已接受**。
 - `danger-full-access` 下远端 `write` / `edit` 仍被限制在远端工作区根：`write-fence` 对 danger 放行（[src/sandbox/write-fence.ts](packages/dsh-hardssh/src/sandbox/write-fence.ts) 第 30 行），但 `RemoteFileSystem` 的 `confineRoot` 无条件拒绝根外路径（[src/remote/remote-fs.ts](packages/dsh-hardssh/src/remote/remote-fs.ts) 第 178 行，`workspace.ssh-outside-root`）。本地 danger 不限制路径，语义不一致。**待办**（优先级低）：需要独立的 unrooted 远端 fs 后端，不是改一行 fence 能解决。
 - 远端 Landlock 是**部分强制**：aliyun 内核 Landlock ABI 较旧，stderr 会打印 `landlock-run: partial enforcement (older Landlock ABI)`；已接受（可见、非静默降级），但安全语义弱于完整 enforce。换主机/内核后需复测。
 - arm64 `landlock-run` 资产未在真机验证过（只有 x86_64 的 aliyun + WSL 实测）。**待办**（有 ARM 主机时）。
-- live SSH 用例默认跳过（需 `DSH_LIVE_SSH=1`），默认套件不覆盖真实远端；CI 也没有真实 SSH。**已接受**（默认 771 通过 + 1 skipped）。
+- live SSH 用例默认跳过（需 `DSH_LIVE_SSH=1`），默认套件不覆盖真实远端；CI 也没有真实 SSH。**已接受**（默认 667 通过 + 1 skipped）。
 - 0.1.x 宿主明确不支持 `hardssh-shell`：`apply()` 有前置版本检查会拒绝挂载（而不是静默降级）。自用只跑 0.2.x，**已接受**；README 兼容性说明里已写。
 - `RemoteFileSystem` 的可用范围是远端工作区根（读取也受 `confineRoot` 约束，例如读 `/etc/os-release` 会被拒）；这是设计选择，不是 bug，但模型容易误以为能读任意远端路径（公告已提醒"超出工作区根的路径会被拒绝"）。**已接受**。
 
-## 3. 工具层遗留
+## 3. 工具层遗留（已随 ops 能力移除）
 
-**状态：待决策 / 待办**
+**状态：已解决（2026-11-04 删除多主机 SSH 运维面）**
 
-- `ssh_*` 工具失败时不是 `isError`：`failure()` 只返回文本块（[src/ssh/tools.ts](packages/dsh-hardssh/src/ssh/tools.ts) 第 53 行起），框架把工具结果标成 `isError=false`。实测：`ssh_exec` 用了工作区标题当 alias，结果 `ssh_exec failed: alias 'tmp' not found` 仍是 `isError=false`，模型可能不把它当失败处理。**待决策**：改成抛错让框架标 `isError=true`，或统一在失败文本前加显式标记。
-- `remote_status` / `remote_ls` 在 SSH 绑定会话里与注入公告、bash/glob 的能力重叠（9 个工具定义共 6089 字符 ≈ 1.5k tokens；`remote_ls` 435、`remote_status` 326）。**讨论中**，当前倾向保留（诊断价值 + 非绑定会话可用），不为了 <200 tokens 改工具集/公告/测试。
-- `remote_*` 与 `ssh_*` 共 9 个工具是**全局注册**：本地会话也会收到全部工具定义并占用上下文，调用了才报 `not bound`。DSH 当前没有按会话绑定状态动态注册工具的通路；如果以后上下文吃紧，这是第一个该考虑的点。**已接受**。
-- 模型曾把工作区标题（如 `tmp`）当 alias 传给 `ssh_exec` → 失败。已把公告与 `remote_status` 输出改成别名优先，并在公告里写明「ssh_* 的 alias 参数用 `aliyun` 而不是标题」，终端 alias 不存在时会列出可用 alias（[src/ssh/engine.ts](packages/dsh-hardssh/src/ssh/engine.ts) 第 202-210 行）。**防回归**，测试在 `tests/workspace-guidance.test.ts`。
+- 6 个 `ssh_*` 工具（list/exec/upload/download/tunnel/cluster）与 3 个 `remote_*` 工具（status/ls/search）全部删除，不再全局注册、不再注入 SSH 运维公告，ops 路由/UI（终端、传输、隧道、集群、运维 Tab）同步删除。核心只保留「一个工作区 = 一台主机」的透明路由，模型看到的仍是原生 read/write/edit/bash/glob/grep。
+- 因此原先的工具层问题（失败不标 `isError`、9 个工具占上下文、标题 vs alias、跨主机感知）不再存在；相关测试删除，新增 `tests/ssh/plugin.test.ts` 断言只挂载连接配置路由、不注册 terminal upgrade，`tests/workspace-guidance.test.ts` 断言公告不含 `ssh_*`/`remote_*` 工具名。
+- 新的边界：连接配置仍需要最小主机 CRUD + 凭据/TOFU/目录浏览路由，这是工作区创建的必要面，不对 agent 暴露工具。
 
 ## 4. 已解决但容易复发的坑（防回归）
 

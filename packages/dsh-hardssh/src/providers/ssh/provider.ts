@@ -238,8 +238,8 @@ export class SshWorkspaceSearch implements WorkspaceSearchService {
     for (const line of result.lines) {
       // grepFixed returns `absolute-path:line:content` records; the first
       // colon splits the path from the line/content remainder. The whole raw
-      // record is preserved as `match` so capability consumers (e.g. the
-      // remote_search agent tool) can render matched snippets.
+      // record is preserved as `match` so capability consumers can render
+      // matched snippets.
       const colon = line.indexOf(':')
       const absPath = colon >= 0 ? line.slice(0, colon) : line
       if (this.relativeTo(absPath, base) === undefined) continue

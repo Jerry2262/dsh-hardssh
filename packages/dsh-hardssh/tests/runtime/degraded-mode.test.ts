@@ -170,13 +170,13 @@ describe('hardssh health registry', () => {
     expect(initial.packageVersion).toMatch(/^\d+\.\d+\.\d+/)
     expect(initial.testedDshRange).toContain('0.1.5')
 
-    health.set('sshTools', { state: 'ready' })
-    expect(health.snapshot().features.sshTools.state).toBe('ready')
+    health.set('workspaceCore', { state: 'ready' })
+    expect(health.snapshot().features.workspaceCore.state).toBe('ready')
     const updatedAt = health.snapshot().updatedAt
-    health.set('sshTools', { state: 'ready' })
+    health.set('workspaceCore', { state: 'ready' })
     expect(health.snapshot().updatedAt).toBe(updatedAt)
     // Unrelated features are untouched.
-    expect(health.snapshot().features.workspaceCore.state).toBe('degraded')
+    expect(health.snapshot().features.fsRouting.state).toBe('degraded')
   })
 
   it('hands out copies so a reader cannot mutate the registry', () => {

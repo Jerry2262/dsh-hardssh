@@ -402,131 +402,6 @@ describe('retry policy (P0-07)', () => {
   })
 })
 
-describe('cluster', () => {
-  it('runs one command on every matched host concurrently', async () => {
-    addHost('cluster-a')
-    addHost('cluster-b')
-    addHost('cluster-c', { environment: 'staging' })
-    // The store accumulates hosts from every test; scope by explicit aliases.
-    const aliases = ['cluster-a', 'cluster-b', 'cluster-c']
-    const results = await engine.cluster({ command: 'echo hello', aliases })
-    expect(results).toHaveLength(3)
-    for (const result of results) {
-      expect(result.ok).toBe(true)
-      expect(result.stdout).toContain('hello')
-    }
-    const scoped = await engine.cluster({ command: 'true', aliases: ['cluster-a'] })
-    expect(scoped).toHaveLength(1)
-    expect(scoped[0]?.alias).toBe('cluster-a')
-    const staging = await engine.cluster({ command: 'true', aliases, environment: 'staging' })
-    expect(staging).toHaveLength(1)
-    expect(staging[0]?.alias).toBe('cluster-c')
-    const none = await engine.cluster({ command: 'true', aliases, environment: 'production' })
-    expect(none).toHaveLength(0)
-  })
-
-  it('keeps the result order aligned with the requested aliases', async () => {
-    // The store insertion order is cluster-a/b/c; requesting them in reverse
-    // must yield results in the REQUESTED order, not the store/completion
-    // order (results are written into pre-sized slots by index).
-    const reversed = ['cluster-c', 'cluster-b', 'cluster-a']
-    const results = await engine.cluster({ command: 'echo hello', aliases: reversed })
-    expect(results.map(result => result.alias)).toEqual(reversed)
-  })
-
-  it('rejects an explicit alias batch before executing when one alias is unknown', async () => {
-    addHost('cluster-preflight-known')
-    const exec = vi.spyOn(engine, 'exec')
-    try {
-      await expect(engine.cluster({
-        command: 'echo must-not-run',
-        aliases: ['cluster-preflight-known', 'cluster-preflight-typo'],
-      })).rejects.toThrow(/cluster-preflight-typo.*not found/)
-      expect(exec).not.toHaveBeenCalled()
-    } finally {
-      exec.mockRestore()
-    }
-  })
-})
-
-describe('cluster typed failures (B-14)', () => {
-  /** One-host engine over a stub store: per-host failures need no network. */
-  function clusterEngine(): SshEngine {
-    const entry = {
-      alias: 'cluster-host',
-      host: '127.0.0.1',
-      port: 22,
-      user: 'u',
-      auth: { kind: 'password' as const, password: 'pw' },
-      proxyJump: [],
-      tags: [],
-      createdAt: 0,
-      updatedAt: 0,
-    }
-    return new SshEngine({ find: () => entry, list: () => [entry] } as never)
-  }
-
-  it('keeps the human-readable error string and adds the typed interactive failure fields', async () => {
-    const failing = clusterEngine()
-    const exec = vi.spyOn(failing, 'exec')
-    try {
-      exec.mockRejectedValueOnce(new NeedsPasswordError('cluster-host', 'passphrase'))
-      const [needsSecret] = await failing.cluster({ command: 'echo hello' })
-      expect(needsSecret).toMatchObject({ alias: 'cluster-host', ok: false, code: 'NEEDS_PASSWORD', secret: 'passphrase' })
-      expect(needsSecret!.error).toContain('cluster-host')
-
-      exec.mockRejectedValueOnce(new HostKeyUnknownError('cluster-host', 'SHA256:abc'))
-      const [unknown] = await failing.cluster({ command: 'echo hello' })
-      expect(unknown).toMatchObject({ code: 'HOST_KEY_UNKNOWN', hostKeyFingerprint: 'SHA256:abc' })
-
-      exec.mockRejectedValueOnce(new HostKeyMismatchError('cluster-host', 'SHA256:old', 'SHA256:new'))
-      const [mismatch] = await failing.cluster({ command: 'echo hello' })
-      expect(mismatch).toMatchObject({ code: 'HOST_KEY_MISMATCH', expected: 'SHA256:old', actual: 'SHA256:new' })
-
-      exec.mockRejectedValueOnce(Object.assign(new Error('aborted'), { name: 'AbortError' }))
-      const [aborted] = await failing.cluster({ command: 'echo hello' })
-      expect(aborted!.code).toBe('ABORTED')
-    } finally {
-      failing.dispose()
-    }
-  })
-
-  it('marks a timed-out command with the TIMEOUT code', async () => {
-    const timingOut = clusterEngine()
-    const exec = vi.spyOn(timingOut, 'exec')
-    try {
-      exec.mockResolvedValueOnce({
-        success: false,
-        exitCode: null,
-        timedOut: true,
-        stdout: '',
-        stderr: '',
-        durationMs: 5,
-        error: 'command timed out after 1 ms',
-      })
-      const [entry] = await timingOut.cluster({ command: 'echo hello' })
-      expect(entry).toMatchObject({ ok: false, timedOut: true, code: 'TIMEOUT' })
-    } finally {
-      timingOut.dispose()
-    }
-  })
-
-  it('redacts session credentials from cluster failure output', async () => {
-    const leaking = clusterEngine()
-    leaking.setSessionPassword('cluster-host', { password: 'S3cret-Pa55word' })
-    const exec = vi.spyOn(leaking, 'exec')
-    try {
-      exec.mockRejectedValueOnce(new Error('auth failed for S3cret-Pa55word'))
-      const [entry] = await leaking.cluster({ command: 'echo hello' })
-      expect(entry!.code).toBe('ERROR')
-      expect(entry!.error).toContain('[REDACTED]')
-      expect(JSON.stringify(entry)).not.toContain('S3cret-Pa55word')
-    } finally {
-      leaking.dispose()
-    }
-  })
-})
-
 describe('shell', () => {
   it('opens a PTY, echoes input, resizes, and exits', async () => {
     addHost('shell-host')
@@ -548,52 +423,8 @@ describe('shell', () => {
   })
 })
 
-describe('tunnel', () => {
-  it('forwards a local port to the remote echo server', async () => {
-    addHost('tunnel-host')
-    const tunnel = await engine.startTunnel('tunnel-host', { remotePort: server.echoPort })
-    expect(tunnel.localPort).toBeGreaterThan(0)
-    expect(engine.listTunnels()).toHaveLength(1)
-    const reply = await new Promise<string>((resolve, reject) => {
-      const socket = connect(tunnel.localPort, '127.0.0.1')
-      const timer = setTimeout(() => { socket.destroy(); reject(new Error('tunnel echo timed out')) }, 3_000)
-      socket.on('connect', () => socket.write('ping-through-tunnel'))
-      socket.on('data', (chunk: Buffer) => {
-        clearTimeout(timer)
-        socket.destroy()
-        resolve(chunk.toString('utf8'))
-      })
-      socket.on('error', (error) => { clearTimeout(timer); reject(error) })
-    })
-    expect(reply).toBe('ping-through-tunnel')
-    const record = (engine as unknown as {
-      tunnelService: { tunnels: Map<string, { sockets: Set<unknown> }> }
-    }).tunnelService.tunnels.get(tunnel.id)
-    await vi.waitFor(() => expect(record?.sockets.size).toBe(0))
-    expect(engine.stopTunnel(tunnel.id)).toBe(true)
-    expect(engine.listTunnels()).toHaveLength(0)
-  })
-
-  it('marks tunnels failed when the transport dies and stop stays idempotent (P0-08)', async () => {
-    addHost('p0-08-fail')
-    const info = await engine.startTunnel('p0-08-fail', { remotePort: server.echoPort })
-    expect(info.state).toBe('forwarding')
-    server.killAllClients()
-    // Let the client 'close' propagate to the failure handler.
-    await new Promise(resolve => setTimeout(resolve, 200))
-    expect(engine.listTunnels().find(tunnel => tunnel.id === info.id)?.state).toBe('failed')
-    const failedRecord = (engine as unknown as {
-      tunnelService: { tunnels: Map<string, { lease: { released: boolean } }> }
-    }).tunnelService.tunnels.get(info.id)
-    expect(failedRecord?.lease.released).toBe(true)
-    expect(engine.stopTunnel(info.id)).toBe(true)
-    expect(engine.stopTunnel(info.id)).toBe(false)
-    expect(engine.listTunnels()).toHaveLength(0)
-  })
-})
-
 describe.skipIf(process.platform === 'win32' || !existsSync('/usr/sbin/sshd'))('sftp (real sshd)', () => {
-  it('uploads, lists, and downloads files', async () => {
+  it('uploads and lists files', async () => {
     const sshd = await TestSshd.start()
     try {
       store.create({
@@ -613,10 +444,6 @@ describe.skipIf(process.platform === 'win32' || !existsSync('/usr/sbin/sshd'))('
 
       const listing = await engine.ls('sftp-real', remoteDir)
       expect(listing.some(entry => entry.name === 'payload.txt' && entry.type === 'file')).toBe(true)
-
-      const downloaded = await engine.download('sftp-real', join(remoteDir, 'payload.txt'), join(sshd.root, 'out.txt'))
-      expect(downloaded.bytes).toBe(content.length)
-      expect(readFileSync(join(sshd.root, 'out.txt'), 'utf8')).toBe(content)
     } finally {
       sshd.stop()
     }
@@ -711,57 +538,6 @@ describe.skipIf(process.platform === 'win32' || !existsSync('/usr/sbin/sshd'))('
   })
 })
 
-
-describe('cluster filters', () => {
-  it('matches hosts carrying ALL requested tags', async () => {
-    addHost('tag-web', { tags: ['web'] })
-    addHost('tag-both', { tags: ['web', 'staging'] })
-    addHost('tag-staging', { tags: ['staging'] })
-    const results = await engine.cluster({ command: 'true', tags: ['web', 'staging'] })
-    expect(results.map(r => r.alias)).toEqual(['tag-both'])
-  })
-
-  it('rejects invalid maxWorkers', async () => {
-    await expect(engine.cluster({ command: 'true', maxWorkers: 0 })).rejects.toThrow(/maxWorkers/)
-    await expect(engine.cluster({ command: 'true', maxWorkers: -2 })).rejects.toThrow(/maxWorkers/)
-  })
-})
-
-describe('tunnel safety', () => {
-  it('rejects out-of-range ports', async () => {
-    addHost('tun-port')
-    await expect(engine.startTunnel('tun-port', { remotePort: 0 })).rejects.toThrow(/remotePort/)
-    await expect(engine.startTunnel('tun-port', { remotePort: 70_000 })).rejects.toThrow(/remotePort/)
-    await expect(engine.startTunnel('tun-port', { remotePort: 22, localPort: 0 })).rejects.toThrow(/localPort/)
-  })
-
-  it('rolls back the connection when the local port is taken', async () => {
-    addHost('tun-conflict')
-    const blocker = createServer(() => undefined)
-    await new Promise<void>((resolve) => { blocker.listen(0, '127.0.0.1', resolve) })
-    const takenPort = (blocker.address() as AddressInfo).port
-    await expect(
-      engine.startTunnel('tun-conflict', { remotePort: server.echoPort, localPort: takenPort }),
-    ).rejects.toThrow()
-    expect(engine.listTunnels()).toHaveLength(0)
-    // The failed tunnel must not pin a leaked connection: exec still works.
-    const result = await engine.exec('tun-conflict', 'true')
-    expect(result.success).toBe(true)
-    await new Promise<void>((resolve) => { blocker.close(() => resolve()) })
-  })
-
-  it('stops tunnels scoped by alias', async () => {
-    addHost('tun-a')
-    addHost('tun-b')
-    const a = await engine.startTunnel('tun-a', { remotePort: server.echoPort })
-    const b = await engine.startTunnel('tun-b', { remotePort: server.echoPort })
-    const stopped = engine.stopAllTunnels('tun-a')
-    expect(stopped).toBe(1)
-    expect(engine.listTunnels().map(t => t.id)).toEqual([b.id])
-    expect(engine.stopTunnel(b.id)).toBe(true)
-    expect(engine.listTunnels()).toHaveLength(0)
-  })
-})
 
 describe('shell isolation', () => {
   it('shell sessions use their own connection and never disturb pooled execs', async () => {

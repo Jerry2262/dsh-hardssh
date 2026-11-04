@@ -35,8 +35,7 @@ import {
 import { SftpService } from './sftp/service.ts'
 import { RemoteCapabilityService, type RemoteCapabilities } from './capabilities/service.ts'
 import { TerminalService } from './terminal/service.ts'
-import { TunnelService } from './tunnel/service.ts'
-import type { SshHostSummary, TransferProgress, TunnelInfo } from './protocol.ts'
+import type { SshHostSummary, TransferProgress } from './protocol.ts'
 import type { HostStoreView } from '../core.ts'
 
 /**
@@ -147,18 +146,17 @@ export interface ExecSession extends ShellSession {
 }
 
 /**
- * The SSH engine. Owns the connection pool, tunnels, standalone terminal
- * transports and SFTP channels. One instance per plugin apply.
+ * The SSH engine. Owns the connection pool, streaming exec transports and SFTP
+ * channels. One instance per plugin apply.
  *
- * Kept as the public facade over ConnectionManager/TunnelService/
- * TerminalService/SftpService: every method here is a thin delegation, so the
- * class identity (and therefore WeakMap cache keys in production) is stable.
+ * Kept as the public facade over ConnectionManager/TerminalService/SftpService:
+ * every method here is a thin delegation, so the class identity (and therefore
+ * WeakMap cache keys in production) is stable.
  */
 export class SshEngine {
   private readonly manager: ConnectionManager
   private readonly sftpService: SftpService
   private readonly capabilityService: RemoteCapabilityService
-  private readonly tunnelService: TunnelService
   private readonly terminalService: TerminalService
 
   /**
@@ -175,7 +173,7 @@ export class SshEngine {
     this.manager = new ConnectionManager(store, resolved, deps, {
       onClientDisposed: (client, error) => { this.sftpService?.onClientDisposed(client, error) },
       redactOutput: text => deps?.redactOutput?.(text) ?? text,
-      // Bound so cluster()/test() fan out through the same engine.exec
+      // Bound so test()/probing fan out through the same engine.exec
       // identity that callers observe (and tests can spy on).
       executor: (alias, command, execOptions) => execOptions === undefined
         ? this.exec(alias, command)
@@ -193,10 +191,6 @@ export class SshEngine {
     this.capabilityService = new RemoteCapabilityService({
       exec: (alias, command, options) => this.exec(alias, command, options),
       generation: alias => this.manager.connections.generation(alias),
-    })
-    this.tunnelService = new TunnelService({
-      connections: this.manager.connections,
-      findEntry: alias => store.find(alias),
     })
     this.terminalService = new TerminalService({
       connectStandalone: async (alias) => {
@@ -422,26 +416,13 @@ export class SshEngine {
     }, { attempts: 3, retryPolicy: options.retry, signal: options.signal })
   }
 
-  /**
-   * Run one command against many hosts concurrently. Per-host failures carry
-   * the typed, secret-free fields declared on `ClusterResult`.
-   */
-  cluster(options: {
-    command: string
-    aliases?: string[]
-    environment?: string
-    tags?: string[]
-    timeoutMs?: number
-    maxWorkers?: number
-    /** Aborts every per-host run when the caller disconnects. */
-    signal?: AbortSignal
-  }): Promise<import('./protocol.ts').ClusterResult[]> {
-    return this.manager.cluster(options)
-  }
-
   // -------------------------------------------------------------- shell
 
-  /** Open a PTY shell session for the web terminal (standalone connection). */
+  /**
+   * Open a PTY shell session (the subprocess seam's terminal capability).
+   * The session rides its own connection so closing it cannot tear down a
+   * pooled exec sharing the alias.
+   */
   openShell(alias: string, size: { cols: number; rows: number }): Promise<ShellSession> {
     return this.terminalService.openShell(alias, size)
   }
@@ -460,11 +441,6 @@ export class SshEngine {
   /** Upload one local file (or directory tree) to a remote path. */
   upload(alias: string, localPath: string, remotePath: string, recursive: boolean, onProgress?: (progress: TransferProgress) => void, signal?: AbortSignal): Promise<{ bytes: number; files: number }> {
     return this.sftpService.upload(alias, localPath, remotePath, recursive, onProgress, signal)
-  }
-
-  /** Download one remote file to a local path. */
-  download(alias: string, remotePath: string, localPath: string, onProgress?: (progress: TransferProgress) => void, signal?: AbortSignal): Promise<{ bytes: number }> {
-    return this.sftpService.download(alias, remotePath, localPath, onProgress, signal)
   }
 
   /** List a remote directory (file browser). Bounded by a timeout so a
@@ -560,24 +536,6 @@ export class SshEngine {
     return this.sftpService.rename(alias, fromPath, toPath, signal)
   }
 
-  // ------------------------------------------------------------- tunnel
-
-  async startTunnel(alias: string, options: { remotePort: number; remoteHost?: string; localPort?: number }): Promise<TunnelInfo> {
-    return this.tunnelService.startTunnel(alias, options)
-  }
-
-  listTunnels(): TunnelInfo[] {
-    return this.tunnelService.listTunnels()
-  }
-
-  stopTunnel(id: string): boolean {
-    return this.tunnelService.stopTunnel(id)
-  }
-
-  stopAllTunnels(alias?: string): number {
-    return this.tunnelService.stopAllTunnels(alias)
-  }
-
   // ------------------------------------------------------------- misc
 
   /** Probe connectivity: connect, run `true`, close. Typed errors the GUI
@@ -598,7 +556,6 @@ export class SshEngine {
    * one dispose point.
    */
   dispose(): void {
-    this.tunnelService.dispose()
     this.terminalService.dispose()
     this.sftpService.dispose(new Error('SSH engine disposed while SFTP was active'))
     this.capabilityService.dispose()

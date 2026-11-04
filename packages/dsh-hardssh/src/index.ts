@@ -37,10 +37,8 @@ import { anchorRoot } from './ledger.ts'
 import { GenericWorkspaceStore, type WorkspaceStoreView } from './backend.ts'
 import { makeRoutes, reconcileHostWorkspaces, type HostWorkspaceReconcileDeps, type HostWorkspaceReconcileReport } from './routes.ts'
 import { RemoteSandboxProvisioner } from './sandbox/remote-sandbox.ts'
-import { makeWorkspaceTools } from './tools.ts'
-import { capabilityToolOpsResolver } from './workspace-tool-ops.ts'
 import { SshEngine } from './ssh/engine.ts'
-import { mountSshCapability, SSH_SETTINGS_NAMESPACE } from './ssh/plugin.ts'
+import { mountSshCapability } from './ssh/plugin.ts'
 import { HostStore } from './ssh/store.ts'
 import { SecureHostStore } from './ssh/store.ts'
 import { checkCommand, commandGuardTargets } from './ssh/command-policy.ts'
@@ -66,17 +64,15 @@ export const inject = ['tools']
 /** Plugin config (schemastery; optional fields use .default, never .optional). */
 export interface Config {
   /**
-   * Workspace-surface switch (default on). It gates ONLY the SSH-workspace
+   * Workspace-surface switch (default on). It gates the SSH-workspace
    * surfaces this row mounts after the check below: the /api/dsh-hardssh
-   * workspace CRUD routes, the remote_* workspace agent tools, and the
-   * workspace announcement section. It does NOT gate the SSH operations
-   * capability (host manager, ssh_* tools, /api/dsh-hardssh/ssh, web terminal
-   * — its own `dsh-hardssh` settings namespace `enabled`), the shared
-   * engine/host-store/vault, the fs/subprocess routing rows, or the seam
-   * replacement itself: those mount before this switch and keep running.
+   * workspace CRUD routes and the workspace announcement section. The
+   * connection-configuration routes, the shared engine/host-store/vault, the
+   * fs/subprocess routing rows, and the seam replacement itself mount before
+   * this switch and keep running (a workspace must be creatable/connectable).
    */
   enabled: boolean
-  /** Whether the model-facing announcement section is mounted. */
+  /** Whether the (single-workspace) remote-routing announcement is mounted. */
   announceToAgent: boolean
   /**
    * Secret storage mode: 'none' (default, VSCode Remote-SSH style: passwords
@@ -85,9 +81,7 @@ export interface Config {
    *
    * This is the SINGLE SOURCE for the mode: the Vault and SecureHostStore are
    * constructed once from it when the plugin loads, so changing it requires a
-   * plugin reload. The `dsh-hardssh` settings namespace also exposes
-   * `secretStorage` for the settings UI, but that value cannot switch storage
-   * mode at runtime (see reportSecretStorageDrift below).
+   * plugin reload.
    */
   secretStorage: 'none' | 'vault'
   /**
@@ -115,53 +109,6 @@ export const Config: z<Config> = z.object({
  */
 export function resolveSecretStorageMode(config?: { secretStorage?: unknown }): 'none' | 'vault' {
   return config?.secretStorage === 'vault' ? 'vault' : 'none'
-}
-
-/** Read the `secretStorage` field out of a resolved settings section. */
-function secretStorageOf(section: unknown): 'none' | 'vault' | undefined {
-  if (typeof section !== 'object' || section === null) return undefined
-  const value = (section as { secretStorage?: unknown }).secretStorage
-  return value === 'vault' ? 'vault' : value === 'none' ? 'none' : undefined
-}
-
-/**
- * Report a secretStorage disagreement between the RUNNING mode (fixed when the
- * Vault/SecureHostStore were constructed at plugin load) and the value the
- * `dsh-hardssh` settings namespace currently resolves to. The mode cannot change
- * at runtime, so staying silent would let the settings UI claim a storage mode
- * this process is not using.
- * @param running - the construction-time mode actually in effect.
- * @param section - the resolved `dsh-hardssh` settings section (any shape).
- * @returns the warning text, or undefined when both agree / the value is unusable.
- */
-export function secretStorageDriftMessage(running: 'none' | 'vault', section: unknown): string | undefined {
-  const requested = secretStorageOf(section)
-  if (requested === undefined || requested === running) return undefined
-  return `[dsh-hardssh] secretStorage: the dsh-hardssh settings namespace resolves to '${requested}' but this process is running '${running}'. The mode is fixed by the plugin config (secretStorage) when the plugin loads — the vault and host store are constructed once — so the namespace value is ignored; set secretStorage: '${requested}' in the plugin config and reload the plugin (restart dsh web) to switch.`
-}
-
-/**
- * Report secretStorage drift once at mount and on every committed settings
- * change (deduplicated, so a repeated change does not spam the log). The
- * settings service is a sibling context and cordis events travel UP from the
- * emitting ctx, so the listener sits on the root context; `ctx.effect` keeps
- * the subscription tied to this plugin's lifetime.
- * @param ctx - the plugin context (provides `settings` when present).
- * @param running - the construction-time mode actually in effect.
- */
-export function watchSecretStorageDrift(ctx: Context, running: 'none' | 'vault'): void {
-  let last: string | undefined
-  const report = (section: unknown): void => {
-    const message = secretStorageDriftMessage(running, section)
-    if (message === undefined || message === last) return
-    last = message
-    console.warn(message)
-  }
-  const settings = ctx.get('settings') as { get?: (ns: string) => unknown } | undefined
-  report(settings?.get?.(SSH_SETTINGS_NAMESPACE))
-  ctx.effect(() => ctx.root.on('settings/updated', (ns, next) => {
-    if (ns === SSH_SETTINGS_NAMESPACE) report(next)
-  }), 'dsh-hardssh: secretStorage drift watch')
 }
 
 /** Isolated-path options for one generic startup (tests inject temp dirs). */
@@ -225,7 +172,7 @@ function renderWorkspaceGuidance(workspaces: WorkspaceStoreView, context: unknow
 
 /** Local-session branch of the announcement. Exported for the guidance test. */
 export function localGuidance(): string {
-  return '本机已安装 dsh-hardssh 插件（SSH 工作区）。当前会话是本机工作区：正常使用全部工具（pwsh / bash / glob / grep / read / write / edit），文件操作与 bash 命令都在本机执行。remote_ls / remote_search / remote_status 与 ssh_exec / ssh_upload / ssh_download / ssh_tunnel / ssh_cluster 用于一次性远程运维（消耗真实远程资源，先确认再执行）。用户提到「SSH 工作区 / 远程工作区 / 远程文件 / 远程项目 / 远程服务器上改代码」时即指本插件。'
+  return '本机已安装 dsh-hardssh 插件（SSH 工作区）。当前会话是本机工作区：正常使用全部工具（pwsh / bash / glob / grep / read / write / edit），文件操作与 bash 命令都在本机执行。需要把远端目录当作工作区时，在「SSH 工作区」面板添加并在对应会话中操作。用户提到「SSH 工作区 / 远程工作区 / 远程项目」时即指本插件。'
 }
 
 /**
@@ -241,12 +188,10 @@ export function localGuidance(): string {
  * Exported for the guidance test.
  */
 export function remoteGuidance(record: SshWorkspaceRecord): string {
-  return `本机已安装 dsh-hardssh 插件（SSH 工作区）。当前会话绑定到远程工作区「${record.title}」，主机别名是 \`${record.alias}\`（${record.remoteRoot}）：
-- read / write / edit 自动路由到远程（SFTP）；路径用远程绝对路径（如 ${record.remoteRoot}/src/main.ts），相对路径以远程根目录为基准。
-- bash 工具同样在远端执行（\`bash -c\` 语义），文件写入由远端 Landlock 沙箱按会话权限 preset 约束；远端 shell 操作直接用 bash，不需要改用 ssh_exec。
-- glob / grep 在 SSH 工作区里**直接查远端**：宿主机有 ripgrep 时在服务器上执行同一条 rg 命令；没有时代答（POSIX find/grep 模板或 SFTP 遍历），返回格式与原生一致（glob 只列文件，grep 返回「路径:行号:内容」）。搜索路径按工作区根用 POSIX 形式给出，超出工作区根的路径会被拒绝。需要正则内容检索、更多条数/字节控制时用 remote_search（可选 syntax="regex"，宿主机既无 rg 也无 GNU grep 时会明确报错），列目录用 remote_ls，连接与回退状态用 remote_status。
-- ssh_exec / ssh_upload / ssh_download / ssh_tunnel / ssh_cluster 的 alias 参数用 \`${record.alias}\`，不要用工作区标题「${record.title}」。
-- pwsh / powershell / cmd 是客户端原生二进制，在本机执行；远端为 POSIX 主机时请用 bash 语义命令或 ssh_exec。
+  return `本机已安装 dsh-hardssh 插件（SSH 工作区）。当前会话的工作区在远端主机 \`${record.alias}\` 的 ${record.remoteRoot}：
+- read / write / edit / bash / glob / grep 都直接作用于这个远端目录，用法与本地工作区一致；路径用远端绝对路径（如 ${record.remoteRoot}/src/main.ts），相对路径以远端根目录为基准。
+- bash 命令在远端执行，文件写入由远端 Landlock 沙箱按会话权限 preset 约束；超出工作区根的路径会被拒绝。
+- pwsh / powershell / cmd 是客户端原生二进制，在本机执行；远端为 POSIX 主机时请用 bash 语义命令。
 - 远程操作消耗真实远程资源，先确认再执行。`
 }
 
@@ -333,8 +278,9 @@ export async function reconcileHostWorkspacesOnStartup(deps: HostWorkspaceReconc
 }
 
 /**
- * Mount the mode store, routes, tools, announcement, guard, and the shared core.
- * @param ctx - host plugin context carrying tools/systemPrompt (webServer optional).
+ * Mount the mode store, route seams, workspace UI routes, announcement, guard,
+ * and the shared core.
+ * @param ctx - host plugin context (webServer/systemPrompt optional).
  * @param config - resolved plugin config (schema defaults applied by the loader).
  */
 export function apply(ctx: Context, config?: Config): void {
@@ -342,9 +288,7 @@ export function apply(ctx: Context, config?: Config): void {
     enabled: config?.enabled ?? true,
     announceToAgent: config?.announceToAgent ?? true,
     // Secret storage: 'none' (VSCode Remote-SSH style; default) or 'vault'.
-    // Single-sourced: the Vault/SecureHostStore below are built from THIS
-    // value, and any disagreement with the dsh-hardssh settings namespace is
-    // reported through secretStorageDriftMessage (never silently accepted).
+    // Single-sourced: the Vault/SecureHostStore below are built from THIS value.
     secretStorage: resolveSecretStorageMode(config),
     // Env-based vault auto-unlock is opt-in (see the Config docs): the variable
     // is visible to anything running as this user, so it is not a default.
@@ -419,22 +363,22 @@ export function apply(ctx: Context, config?: Config): void {
   const core: HardsshCore = { hosts: secureHosts, engine }
   ctx.provide('hardsshCore', core)
 
-  // SSH operations capability (host manager, ssh_* tools, /api/dsh-hardssh/ssh,
-  // terminal, settings, prompt) — mounted against the SAME engine/store and
-  // kept independent of the workspace `enabled` switch below (its own
-  // `dsh-hardssh` settings namespace toggles it). The host-delete reference guard
-  // reads the same record source as the workspace surfaces.
+  // Connection configuration routes (hosts / credentials / health) —
+  // mounted against the SAME engine/store and kept independent of the
+  // workspace `enabled` switch below: a workspace must be configurable and
+  // connectable even when the workspace panel itself is switched off. The
+  // host-delete reference guard reads the same record source as the
+  // workspace surfaces.
   mountSshCapability(ctx, { store: secureHosts, engine, knownHosts, vault, ledger: workspaces, health })
 
   // Per-host command guard (tool layer). Default is NO interception: only hosts
-  // that explicitly carry a `commandPolicy` are gated. Covers ssh_exec /
-  // ssh_cluster / bash — every remote-command channel the model can drive.
-  // The seam layer (SshSubprocessRuntime) applies the same policy to spawns
-  // from any consumer; the tool layer gives the operator the readable reason.
+  // that explicitly carry a `commandPolicy` are gated. The only tool-layer
+  // remote-command channel is `bash`; the seam layer (SshSubprocessRuntime)
+  // applies the same policy to spawns from any consumer, so the tool layer
+  // exists to give the operator the readable reason.
   const guardDispose = ctx.tools.guard((execution) => {
     const args = execution.arguments as Readonly<Record<string, unknown>> | undefined
     const targets = commandGuardTargets(execution.name, args, execution.agent?.session?.header?.cwd, {
-      allAliases: () => engine.list().map(host => host.alias),
       aliasForCwd: (cwd) => (cwd === undefined || cwd === '' ? undefined : workspaces.findByAnchorSync(cwd)?.alias),
     })
     if (targets === undefined) return undefined
@@ -449,13 +393,8 @@ export function apply(ctx: Context, config?: Config): void {
   ctx.effect(() => () => { guardDispose() }, 'dsh-hardssh: command-guard')
 
   // C-04: secretStorage is a construction-time decision (vault + store above).
-  // The dsh-hardssh settings namespace exposes the same key for the settings UI,
-  // but its resolve() only reads enabled/announceToAgent, so editing it cannot
-  // switch storage mode. Report the disagreement instead of pretending it
-  // applied: once at mount, then on every committed settings change. The
-  // namespace is registered by mountSshCapability above, so the first read
-  // already sees the resolved value.
-  watchSecretStorageDrift(ctx, resolved.secretStorage)
+  // The plugin config owns the mode; there is no settings namespace that can
+  // disagree with it.
 
   if (!resolved.enabled) return
 
@@ -533,16 +472,9 @@ export function apply(ctx: Context, config?: Config): void {
   ctx.inject(['workspace'], () => { reconcileStartupOnce() })
   ctx.inject(['workspaceRegistry'], () => { reconcileStartupOnce() })
 
-  // Bound-workspace ops always open the generic logical connection and use its
-  // workspace.fs/workspace.search capabilities.
-  const toolOps = capabilityToolOpsResolver(workspaces, genericCore)
-  const tools = makeWorkspaceTools({ workspaces, ops: toolOps })
-  ctx.effect(() => {
-    const disposers = tools.map(tool => ctx.tools.register(tool))
-    return () => {
-      for (const dispose of disposers) dispose()
-    }
-  }, 'dsh-hardssh: tools')
+  // The workspace tools (remote_status / remote_ls / remote_search) were
+  // removed with the SSH-operations capability: bound sessions use the routed
+  // native tools (read/write/edit/bash/glob/grep) directly.
 
   // Tool routing for SSH-bound sessions is handled by the fs/subprocess
   // seams, not by tool guards: glob/grep operate through the routed fs

@@ -56,7 +56,7 @@ export function searchBridgeRefusal(exe: string): Error {
   return new Error(
     `dsh-hardssh: '${base}' is a client-side search tool and cannot read the remote workspace bound to this session `
     + '(its working directory is the local anchor placeholder, not the server). '
-    + 'Search remote content with the remote_search tool (mode="glob" for file names, mode="grep" for content) or ssh_exec instead.',
+    + 'Search remote content with the native glob/grep tools (they are routed to the remote workspace) instead.',
   )
 }
 

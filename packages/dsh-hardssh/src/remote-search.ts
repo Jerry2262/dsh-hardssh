@@ -1,9 +1,9 @@
 /**
- * Remote search semantics shared by the agent's `remote_search` tool (glob /
- * grep modes) and the workspace search capability. Centralizes backend
- * selection, command building, literal escaping, NUL-delimited parsing,
- * local glob matching and truncation rules (P1-11, P1-D) so the former
- * hand-rolled implementations cannot drift again.
+ * Remote search semantics shared by the native glob/grep bridge and the
+ * workspace search capability. Centralizes backend selection, command
+ * building, literal escaping, NUL-delimited parsing, local glob matching and
+ * truncation rules (P1-11, P1-D) so the hand-rolled implementations cannot
+ * drift again.
  *
  * Backend ladder (chosen from the probed connection capabilities, never from a
  * `uname` string):

@@ -8,7 +8,7 @@
 | 插件的做法 | 结论 |
 |---|---|
 | 通过 `ctx.fs` / `ctx.subprocess`（DSH 标准服务）或标准工具（read / write / edit / bash / pwsh…）访问文件与进程 | **0 改动**。seam 已被替换，路由自动生效 |
-| 依赖 **glob / grep** 做检索 | **0 改动**（0.2.5 起）。它们走 `dsh-tool-fs-search` 打包的 ripgrep，spawn 会被 subprocess seam 交给绑定的主机：宿主机有 rg 就跑同一条 argv，否则由搜索阶梯代答并投影成 rg 的输出形状。需要正则/显式预算时仍可用 `remote_search`，列目录用 `remote_ls` |
+| 依赖 **glob / grep** 做检索 | **0 改动**（0.2.5 起）。它们走 `dsh-tool-fs-search` 打包的 ripgrep，spawn 会被 subprocess seam 交给绑定的主机：宿主机有 rg 就跑同一条 argv，否则由搜索阶梯代答并投影成 rg 的输出形状 |
 | 直接 `import 'node:fs'` / `node:child_process`，或自建「本地/远端」状态、自建 workspace 句柄 | 需要改接口，按第 1～3 节替换 |
 
 判定命令（在插件源码根执行）：
@@ -128,7 +128,7 @@ const dispose = ctx.workspaceCore.registerProvider(provider)
 1. `rg "node:fs|node:child_process" src` 无生产命中（测试除外）。
 2. 不再存在自建的 path→远端映射或 local/remote 全局状态。
 3. 所有工作区查询都经 `ctx.workspaceCore`；provider 身份判断用 `record.provider.id`。
-4. 在 SSH 工作区 session 中执行插件核心功能 → 落在远端（用 `remote_*` 工具或远端 `pwd` 复核）。
+4. 在 SSH 工作区 session 中执行插件核心功能 → 落在远端（用远端 `pwd` / `uname` 复核）。
 5. 在本地 session 中执行同一功能 → 行为与改造前一致。
 6. 单元测试里用假 `WorkspaceCore` 注入即可，无需真实 SSH。
 

@@ -156,7 +156,7 @@ export function WorkspaceManagerPanel({ manager, sshApi }: WorkspaceManagerPanel
           <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
             {degradedFeatures.map(([feature, value]) => (
               <li key={feature}>
-                {tt(`health.feature.${feature}` as 'health.feature.sshTools')}
+                {tt(`health.feature.${feature}` as 'health.feature.workspaceCore')}
                 {' — '}
                 {tt(`health.state.${value.state}` as 'health.state.degraded')}
                 {value.reason !== undefined ? `：${value.reason}` : ''}

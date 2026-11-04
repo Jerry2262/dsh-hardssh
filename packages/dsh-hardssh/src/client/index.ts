@@ -29,8 +29,6 @@ import { connectHost, subscribeConnectState } from './connect-host.ts'
 import { badgeBindings, mountWorkspaceBadges, type NativeWorkspacesLike } from './workspace-badges.ts'
 import { mountWorkspaceFilesPathRemap } from './workspace-files-path.ts'
 import { makeAnchorAliasResolver, mountSessionConnectGate, type SessionGateList } from './session-connect-gate.ts'
-import { mountSshOperations } from './ssh/apply.ts'
-import { createSessionSshTargetSource } from './ssh/session-target.ts'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
@@ -39,13 +37,8 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
   }
 }
 
-// Type-only re-exports of the SSH operations surfaces (merge phase 2).
-export type { SshPanelProps } from './ssh/panel/SshPanel.tsx'
+// Type-only re-exports of the SSH connection-config surfaces.
 export type { HostFormDialogProps } from './ssh/panel/HostFormDialog.tsx'
-export type { TerminalTabProps } from './ssh/panel/TerminalTab.tsx'
-export type { TransferTabProps } from './ssh/panel/TransferTab.tsx'
-export type { TunnelsTabProps } from './ssh/panel/TunnelsTab.tsx'
-export type { ClusterTabProps } from './ssh/panel/ClusterTab.tsx'
 export type { SshKey } from './ssh/locales.ts'
 
 /** Required services: slots for the extension seats, locale for copy,
@@ -164,7 +157,7 @@ export function apply(ctx: ClientContext): void {
       const snapshot = sessionList.getSnapshot() as unknown as SessionListSnapshotLike
       if (!warnedSessionListShape && sessionListShapeUnsupported(snapshot)) {
         warnedSessionListShape = true
-        console.warn('[dsh-hardssh] the client session list matches neither the pre-0.2.0 nor the 0.2.0 shape — the SSH console and its connection prompt cannot follow the open session on this dsh version')
+        console.warn('[dsh-hardssh] the client session list matches neither the pre-0.2.0 nor the 0.2.0 shape — the connection prompt cannot follow the open session on this dsh version')
       }
       return currentSessionIdOf(snapshot)
     },
@@ -175,11 +168,6 @@ export function apply(ctx: ClientContext): void {
       return byId[id]?.cwd
     },
   }
-
-  // The operations console inherits its ONLY target from the selected Session's
-  // workspace. A local Session resolves to null and the panel renders disabled;
-  // individual operation tabs never own a host picker.
-  mountSshOperations(ctx, sshApi, createSessionSshTargetSource(sessions, manager))
 
   ctx.effect(() => ctx.locale.register(NS, dictionaries), 'dsh-hardssh: dictionaries')
 

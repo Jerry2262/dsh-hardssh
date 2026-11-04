@@ -1,133 +1,72 @@
-# dsh-hardssh — SSH 远程工作区 + SSH 运维插件
+# dsh-hardssh — 把远端目录当作 DSH 工作区
 
-已适配 DSH **0.1.5 ~ 0.2.1，含官方桌面版（Electron）**（0.1.x 兼容矩阵四条线全绿：`0.1.5-rc.1`、`0.1.5-rc.2`、`0.1.6-alpha.1`、`0.1.6-alpha.2`；0.2.x 线已在桌面版 `0.2.1-rc.5` / `0.2.0-rc.2` 上实测宿主侧与工作区注册；peer 范围 `>=0.1.5-rc.1 <0.1.7 || >=0.1.6-alpha.1`，对 0.2.x 不设上限；本包版本 `0.2.7`）。客户端 Windows / Linux / macOS 均可用（CI 在 Linux runner 上跑 Node 22.19 与 24 的完整套件；客户端路径、锚点与远端根之间的映射有专门的跨平台回归用例）。`~/.ssh/config` 会被实时读取（无需导入，插件从不改写该文件）；认证顺序固定为 key → agent → password。在 DSH Web GUI 中提供两块能力（单包单引擎）：
+已适配 DSH **0.1.5 ~ 0.2.1，含官方桌面版（Electron）**。在 DSH Web GUI 里把一台 SSH 主机上的目录添加为原生工作区；在该工作区的会话中，`read` / `write` / `edit` / `bash` / `glob` / `grep` 全部透明地作用于远端目录，用法与本地工作区一致。远端 `bash` 由自动部署的 Landlock 启动器按会话权限 preset 约束。
 
-1. **SSH 运维**：右侧栏「SSH」Tab（从右侧栏标签条的「+」或右侧栏引导页入口打开）→ Web 终端（xterm + WebSocket PTY）、文件上传下载、本地端口转发隧道、当前服务器的远端命令；`ssh_list` / `ssh_exec` / `ssh_upload` / `ssh_download` / `ssh_tunnel` / `ssh_cluster` 六个 Agent 工具；主机配置存 `~/.dsh/dsh-hardssh-ssh.json`。
-2. **SSH 工作区**：左侧侧栏的全局入口行 → 中央面板管理服务器与工作区（增删改查 / `~/.ssh/config` 导入）；绑定后本地 harness 的 fs/subprocess 经接缝门面透明路由到远程主机执行（read/write/edit/bash 在绑定会话中即远程操作）；`remote_*` 三个 Agent 工具（`remote_ls` / `remote_search` / `remote_status`）用于显式操作远端工作区。
+本插件只做这一件事：**一个会话 = 一个远端工作区 = 一台主机**。它不注册任何 `ssh_*` / `remote_*` 模型工具，也不提供多主机运维控制台。主机配置只在「创建工作区」时作为连接信息使用。
 
 ## 核心优势
 
-- **对插件零改动**：`cordis.patch.yml` 禁用部署自带的 `fs-sandbox` / `subprocess` 行，由本包提供路由门面。任何走标准 `ctx.fs` / `ctx.subprocess` 的插件与标准工具，在 SSH 工作区会话里自动运行在远端。
-- **通用工作区底座**：`WorkspaceRecord` / `Provider` / `Connection` / 能力契约 + Registry / Ledger / Router，与 SSH 解耦。SSH 只是一个 provider（如 `ssh`、`local`），可继续接 docker / wsl / 云 devbox，上层插件与 UI 不改；单一运行时，全链路读同一个台账。
-- **少数插件只需改几处接口**：给 agent 的执行手册见 [`SKILLS.md`](./SKILLS.md)——判定命令、接口对照表、可照抄代码与自检清单。
+- **对插件和工具零改动**：`cordis.patch.yml` 禁用部署自带的 `fs-sandbox` / `subprocess` 行，由本包的 `hardssh-fs` / `hardssh-subprocess` / `hardssh-shell` 提供路由门面。任何走标准 `ctx.fs` / `ctx.subprocess` 的插件与标准工具，在 SSH 工作区会话里自动运行在远端；本地会话不受影响。
+- **单一共享实例**：`HostStore` + `SshEngine`（ssh2 连接池）在 `src/index.ts` 创建一次；主机配置变更会失效相关连接。
+- **会话绑定通过 cwd**：SSH 工作区的 anchor 在 `~/.dsh/ssh-workspaces/<id>`，`SwitchFileSystem` / 路由门面按会话 cwd 判断是否路由到远端；`workspace.fs` / `workspace.process` capability 负责实际远端 I/O。
+- **远端搜索**：`glob` / `grep` 在绑定会话里直接查远端（宿主机有 ripgrep 时执行同一条 rg；否则走搜索阶梯），不会把本机结果冒充服务器内容。
+- **远端沙箱**：首次连接时自动上传 `landlock-run` 启动器；`read-only` / `workspace-write` preset 在远端生效（较旧内核为 partial enforcement，stderr 可见）。
+- **公开入口**：`@tiphareth/dsh-hardssh/base`（通用底座）、`@tiphareth/dsh-hardssh/workspace`（平台无关类型面）。
 
-## 架构
+## 界面入口
 
-- **单一共享实例**：`HostStore` + `SshEngine`（ssh2 连接池）在 `src/index.ts` 创建一次，SSH 运维与 SSH 工作区共用同一引擎 —— 配置变更（PATCH/DELETE）同时失效所有连接，无双池问题。
-- **接缝切换**：`cordis.patch.yml` 禁用部署自带的 `fs-sandbox` / `subprocess` 行，由 `dsh-hardssh/fs`、`dsh-hardssh/subprocess` 提供 provider 路由门面（本地 = 沙箱化原实现；远端 = 该 workspace 连接上的 `workspace.fs` / `workspace.process` capability）。
-- **REST**：`/api/dsh-hardssh/ssh`（运维路由，loopback-only）+ `/api/dsh-hardssh`（工作区路由，loopback-only）。
-- **工作区核心服务**：`ctx.workspaceCore`（通用 WorkspaceCore：台账 + provider 路由 + capability 连接）是**唯一**的工作区运行时；`ctx.hardsshCore` 只保留 `hosts` + `engine` 供 SSH 专用集成消费（如四列 IDE 形态的 `dsh-workbench-tiphareth`）。
-- **公开入口**：`@tiphareth/dsh-hardssh/base`（通用底座实现）、`@tiphareth/dsh-hardssh/workspace`（平台无关类型面）。
-
-## 数据目录
-
-插件的用户数据（SSH 主机存储、known_hosts、凭据 vault、工作区账本与 SSH 锚点）统一放在 Harness home 下：优先 `$DSH_HOME`，未设置时 `~/.dsh`（与内核一致）。`~/.ssh/config` 与私钥仍按操作系统用户读取，不受 `$DSH_HOME` 影响。
-
-## 界面入口（全部走标准插件扩展点）
-
-主界面不使用 DOM 注入（侧栏工作区行的远程徽章、文件面板路径改写是自愈式 DOM 装饰）；界面入口都是内核公开的槽位注册：
-
-| 界面 | 入口 | 槽位 |
-|---|---|---|
-| **SSH 工作区管理**（服务器 + 工作区增删改查，服务器行带已连接/未连接徽章） | 左侧侧栏「新会话」与「工作区」之间的全局入口行 → 中央面板 | `sidebar.panellist`（行）+ `main`（面板，key 同为 `dsh-hardssh-workspaces`） |
-| **SSH 运维**（终端 / 传输 / 隧道 / 当前服务器命令） | 右侧栏标签条的「+」或右侧栏引导页入口 | `ctx.sidebarRightTabs.register`（类型）+ `sidebar.right.pane.tab`（正文）+ `sidebar.right.pane.tab.title`（标签文字） |
-| **SSH 工作区创建**（「添加工作区」菜单里的「SSH 工作区…」；先选服务器，再复用内核原生目录对话框，仅把数据面换成 SFTP） | 侧栏「工作区」头部的 ＋ / 空会话 hero 的添加工作区 | `sidebar.workspaces.directoryFlow` + `conversation.hero.workspace.directoryFlow`（负优先级覆盖原生 occupant；本地分支按引用渲染内核 occupant） |
-
-右侧栏 Tab 是 **page 类型**（不声明 `patterns`），只按 kind 打开，由用户从右侧栏自己的入口打开；插件不会强制展开右侧栏。右侧栏 Tab 实例是**每会话独立**的（内核的会话作用域语义），因此切换会话后需要重新打开该 Tab。
-
-## 会话绑定语义（操作台不选服务器）
-
-- 操作台的 SSH 目标由**当前会话的 `cwd`** 决定：最长匹配的 SSH 工作区锚点胜出，取该工作区的 `alias` 与 `remoteRoot`。终端 / 传输 / 隧道 / 命令四个子页都强制使用它，**不提供服务器下拉框**。
-- 会话在本地工作区（或未绑定任何 SSH 工作区）时，操作台不挂载任何操作组件，改为渲染**模糊蒙版**并提示「SSH 操作台仅适用于 SSH 工作区会话」。
-- 切换会话时操作台随 `Session → alias` 自动切换，并重置子页状态。
-- 数据源是公开的 `ctx.sessions.list`（`current` + `byId[id].cwd`）+ `WorkspaceManager` 快照，两者都可订阅，不存在第二份工作区句柄。
-
-## 连接行为
-
-- **启动/刷新只连接当前会话的服务器**：连接闸门在 `ctx.sessions.list` 的 `phase === 'ready'` 之前不建立基准，避免历史会话被误判为「新建会话」而逐台探测；本地会话不触发任何连接。
-- **非交互失败可见**：探测失败（网络不可达、认证失败、主机密钥异常、重试耗尽）会弹出「无法连接服务器」对话框并显示具体原因；用户主动取消密码/指纹弹窗不算失败。
-- **认证被拒立刻重弹并给出原因**：凭据已输入后服务器仍拒绝时，重新打开密码对话框并携带具体 SSH 错误，而不是落到非交互失败对话框。
-- **连接中可见**：连接期间左侧工作区徽章显示旋转指示器，状态翻转原地替换。
-- **工作区文件面板显示远端地址**：面板根锚在本机（会话 cwd），内容已经是远端、地址与面包屑也重写为远端根，避免「地址是本机、内容是服务器」的错觉。
-- **状态徽章只读**：左侧面板每 3 秒读取 `/api/dsh-hardssh/ssh/connections`（连接池 live alias 列表）刷新「已连接 / 未连接」徽章，**不会**主动拨号。
+- **左侧「SSH 工作区」面板**：唯一的管理面。添加/编辑/删除服务器连接，添加/删除远端工作区，显示连接徽章；不提供终端、隧道、集群等运维页签。
+- **目录选择器**：新建 SSH 工作区时浏览远端目录。
+- **右上角无 SSH 运维 Tab**：终端/传输/隧道/集群界面已随 ops 能力一起移除。
 
 ## 主机命令守卫（可选，默认不拦截）
 
-面向「登录节点禁止直接计算」这类主机策略：**默认什么都不拦**，只有给某台主机配了 `commandPolicy` 才生效。配置写在 `~/.dsh/dsh-hardssh-ssh.json` 的单台主机条目里，也可以在「新建/编辑服务器」对话框里填：
-
-```jsonc
-{
-  "alias": "login-node",
-  "host": "192.0.2.10",
-  "user": "alice",
-  "commandPolicy": {
-    "deny": ["(^|[;&|(])\\s*(?:/?[^ /]+/){0,3}(python[0-9.]*|Rscript|R|make|gcc|g\\+\\+)(\\s|$)"],
-    "denyCommands": ["python", "python3", "Rscript", "R", "matlab", "julia", "make", "cmake", "gcc", "g++"],
-    "allowCommands": [],
-    "hint": "登录节点不可直接计算，请用 srun/sbatch 提交到计算节点。"
-  }
-}
-```
-
-- `deny`：每行一个正则，匹配整条命令文本（命令位置锚定，`srun -p gpu python x.py` 这类提交命令不会误伤）；
-- `denyCommands`：命令名清单，匹配前先「解包」——跳过 `FOO=bar`、剥掉 `sudo`/`env`/`time`/`nohup`/`bash -c "…"` 等包装、去路径取 basename，因此 `bash -c 'python x.py'`、`sudo python3 …`、`/usr/bin/python3 …` 都能抓到；
-- `allowCommands`：上述名字的例外（豁免优先）；
-- `hint`：命中时附在报错里的可操作提示；
-- 拦截发生在两层：工具层 `ctx.tools.guard()`（`ssh_exec` / `ssh_cluster` / `bash`）与 seam 层（任何经 `ctx.subprocess` 的远端 spawn，含第三方插件直连）；
-- **这是护栏而非沙箱**：`$(…)`、base64、脚本内部再调用计算命令都能绕过；真正的硬约束要在服务器侧（Slurm 限额、`pam_slurm_adopt`、PATH shim）。另外 `bash` 本身不要列进 `denyCommands`——它被当作包装词剥壳，列为禁止名会连 bash 工具自身的 spawn 一起拦掉。
+面向「登录节点禁止直接计算」这类主机策略：给某台主机配置 `commandPolicy` 后，在该主机的会话里执行 `bash`（以及任何经 `ctx.subprocess` 的 spawn）会先检查禁止命令名/正则，命中时拦下并显示提示。配置写在 `~/.dsh/dsh-hardssh-ssh.json` 的单台主机条目里，也可以在「新建/编辑服务器」对话框里填。它是护栏，不是沙箱；真正的硬限制应放在服务器侧（Slurm、pam 等）。
 
 ## 原生工具在绑定会话里的行为
 
 | 工具 | 行为 |
 |---|---|
-| `read` / `write` / `edit` / `bash` / `pwsh`(本机) | 经 `ctx.fs` / `ctx.subprocess` 路由：SSH 会话里就是远端操作 |
-| `glob` / `grep` | 走搜索桥：宿主机有 ripgrep 就发同一条 argv，否则由搜索阶梯（rg → POSIX 工具 → SFTP 遍历）代答并投影成 rg 的输出形状；不再「显式拒绝」 |
-| `remote_ls` / `remote_search` / `remote_status` | 显式远程运维工具（列目录、正则/字面量检索、绑定状态） |
+| `read` / `write` / `edit` | 走远端 SFTP；路径用远端绝对路径，相对路径以远端根为基准；保留沙箱写入围栏与版本守卫 |
+| `bash` | 在远端以 `bash -c` 执行；远端 Landlock 按 preset 约束写入 |
+| `glob` / `grep` | 查远端：有 rg 时同一条 argv，否则搜索阶梯代答 |
+| `pwsh` / `powershell` / `cmd` | 客户端原生二进制，在本机执行 |
 
 ## 安装
 
-本项目自用，不发布 npm；profile 直接链接本仓库源码：
-
 ```sh
-# 先构建 lib/
 pnpm --filter @tiphareth/dsh-hardssh build
 
-# 把包加入 profile 依赖
 dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 ```
 
-再把 `"@tiphareth/dsh-hardssh"` 加入 profile 的 `dsh.profile.bundles`，重启 `dsh` 生效。
+再把 `"@tiphareth/dsh-hardssh"` 加入 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles`，重启 `dsh web`。桌面版（Electron）需要**完全退出后冷启动**，不要在应用运行中启用（原因见根目录 README）。
 
-**桌面版（Electron）dsh**：可以正常加载本插件，但它的 `desktop` profile 由应用独占管理——
-普通 CLI 执行 `dsh plugin --profile desktop …` 会被拒绝
-（`error: profile "desktop" is managed exclusively by the Electron application`）。
-请改用**桌面版自带的 CLI**（菜单栏「Manage dsh command」，或直接调用
-`<安装目录>\resources\runtime\cli\bin\dsh.cmd`），并且**先完全退出应用**再安装、装完再启动：
-不要在应用运行中用「启用」开关（那会走进程内热重载，撞上 DSH 已知的重载缺陷而失败回滚）。
-详见仓库根 `README.md` 的「安装 → 桌面版（Electron）dsh」。
+## 数据目录
 
-## 开发
-
-在仓库根目录执行：
-
-```sh
-pnpm --filter dsh-hardssh typecheck   # 类型检查
-pnpm test                             # 默认测试套件（vault 加密用例已移出，约 12s）
-pnpm test:vault                       # 只跑 vault 用例（约 21s，scrypt 派生故意慢）
-pnpm --filter dsh-hardssh build       # 产出 lib/（构建前先清空，避免陈旧产物）
-```
-
-> profile 通过 `link:` 指向本包源码目录，因此改码后只需重新 `build`（产出 `lib/`）并重启
-> `dsh web` 即生效；不要把依赖改成 `file:` 安装副本，那会让 profile 加载一份快照而不是源码。
+- 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600；旧 `dsh-ssh.json` 首次启动自动迁移）
+- 加密凭据（`secretStorage: vault`）：`~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`
+- 工作区台账与 anchor：`~/.dsh/workspaces/index.v1.json`、`~/.dsh/workspaces/anchors`、`~/.dsh/ssh-workspaces/`
+- 主机密钥信任：`~/.dsh/ssh-known-hosts.json`
 
 ## 安全模型
 
-- `/api/dsh-hardssh/ssh/*` 与 `/api/dsh-hardssh/*` 仅限 loopback（含同源校验）。
-- 认证材料沿用 `~/.dsh/dsh-hardssh-ssh.json`（0600 / 0700），不新增存储。
-- 路径 gate：远程操作 root 必须等于 resolved remoteRoot；相对路径禁止 `..`；`workspace.fs` / `workspace.process` capability 在解析后的 canonical 路径上再做一次 root 收敛（symlink 逃逸 fail closed）。
-- 远程操作消耗真实远程资源：工具描述与宣告段明确「先确认再执行」；`remote_search` 有深度与条数上限；`glob` / `grep` 在 SSH 会话里由搜索桥代答（同一条 ripgrep argv，或搜索阶梯），不会把本机结果冒充服务器内容——宿主机既无 rg 也无 GNU grep 时，正则检索明确报错而不是把正则当字面量搜。
-- 客户端路径不会被当成服务器路径：绑定会话的 cwd 是本机锚点目录，两个 seam 在派发前把它映射到工作区远端根（`src/switch/anchor-path.ts`）；根之外的**词法**越界按 `FS_NOT_FOUND` 作答，使 `dsh-agent-instructions` 从会话 cwd 向上找项目根的探测能继续走，而符号链接逃逸仍按 `FS_IO_ERROR` fail closed。
-- SSH 模式下本机沙箱不对远程执行生效（远程进程无法被本地内核沙箱约束）：门面的 `sandboxMode` 委托本地后端的真实模式（`write` / `edit` 的沙箱升级入口据此注册），而远端世界的升级策略在门面处**显式丢弃**。
-- 凭据默认不落盘；`secretStorage: vault` 时以 AES-256-GCM + scrypt 加密存储于 `~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`（被 fs seam 拒绝访问），且 `DSH_CREDENTIAL_PASSWORD` 自动解锁默认关闭（需 `vaultAutoUnlock: env`）。会话密码按**连接存活期**复用，连接池回收即失效。
+- `/api/dsh-hardssh/*` 与 `/api/dsh-hardssh/ssh/*` 仅限 loopback（含同源校验）；启动器上传等路径同样走该边界。
+- 远端路径必须落在工作区远端根内；symlink 逃逸 fail closed。
+- vault 目录被 `SwitchFileSystem.deniedRoots` 显式拒绝。
+- 远端沙箱依赖对方内核 Landlock ABI；较旧内核只能部分强制，stderr 会打印提示，不会静默降级。
+- 凭据默认不落盘；`vault` 模式加密存储，`DSH_CREDENTIAL_PASSWORD` 自动解锁默认关闭。
 
-完整的信任边界、能力清单，以及静态扫描命中项（`exec` 方法名、`child_process`、私钥路径字面量等）的逐条说明见仓库根目录的 [SECURITY.md](https://github.com/tiphareth0/dsh-hardssh/blob/master/SECURITY.md)。
+## 开发
+
+```sh
+pnpm typecheck
+pnpm test        # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
+pnpm build
+```
+
+测试基线：667 通过 + 1 skipped（live SSH opt-in）。项目历史与遗留问题见仓库根目录 [LEGACY.md](../../LEGACY.md)。
+
+## License
+
+MIT。SSH 传输层部分源自 [UynajGI/dsh-ssh](https://github.com/UynajGI/dsh-ssh)（MIT）。

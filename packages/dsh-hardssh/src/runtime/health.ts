@@ -32,7 +32,6 @@ function initial(reason: string): FeatureHealth {
 /** Mutable owner of one immutable health snapshot; routes only expose copies. */
 export class HardsshHealthRegistry {
   private features: Record<HealthFeature, FeatureHealth> = {
-    sshTools: initial('SSH tool surface has not mounted yet'),
     workspaceCore: initial('workspace core has not initialized yet'),
     fsRouting: initial('filesystem routing facade has not mounted yet'),
     subprocessRouting: initial('subprocess routing facade has not mounted yet'),
@@ -60,7 +59,6 @@ export class HardsshHealthRegistry {
       packageVersion: packageInfo.version,
       testedDshRange: TESTED_DSH_RANGE,
       features: {
-        sshTools: { ...this.features.sshTools, ...(this.features.sshTools.missing === undefined ? {} : { missing: [...this.features.sshTools.missing] }) },
         workspaceCore: { ...this.features.workspaceCore, ...(this.features.workspaceCore.missing === undefined ? {} : { missing: [...this.features.workspaceCore.missing] }) },
         fsRouting: { ...this.features.fsRouting, ...(this.features.fsRouting.missing === undefined ? {} : { missing: [...this.features.fsRouting.missing] }) },
         subprocessRouting: { ...this.features.subprocessRouting, ...(this.features.subprocessRouting.missing === undefined ? {} : { missing: [...this.features.subprocessRouting.missing] }) },

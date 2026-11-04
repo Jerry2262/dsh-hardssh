@@ -97,28 +97,6 @@ export interface ExecResult {
   error?: string
 }
 
-/** One server entry in a cluster run. */
-export interface ClusterResult {
-  alias: string
-  ok: boolean
-  exitCode?: number | null
-  timedOut?: boolean
-  stdout?: string
-  stderr?: string
-  durationMs?: number
-  error?: string
-  /** Stable machine code for a per-host failure (B-14) — lets callers retry
-   *  on an auth/TOFU gate instead of parsing the human message. */
-  code?: 'NEEDS_PASSWORD' | 'HOST_KEY_UNKNOWN' | 'HOST_KEY_MISMATCH' | 'ALIAS_NOT_FOUND' | 'ABORTED' | 'TIMEOUT' | 'ERROR'
-  /** Which secret the host needs when `code` is NEEDS_PASSWORD. */
-  secret?: 'password' | 'passphrase'
-  /** Server-key fingerprint for HOST_KEY_UNKNOWN / HOST_KEY_MISMATCH. */
-  hostKeyFingerprint?: string
-  /** Expected/actual fingerprints for HOST_KEY_MISMATCH. */
-  expected?: string
-  actual?: string
-}
-
 /** SFTP transfer progress frame (upload stream). */
 export interface TransferProgress {
   phase: 'connecting' | 'transferring' | 'done' | 'error'
@@ -128,18 +106,6 @@ export interface TransferProgress {
   percent: number
   speedBps?: number
   error?: string
-}
-
-/** One active local port-forward tunnel. */
-export interface TunnelInfo {
-  id: string
-  alias: string
-  localPort: number
-  remoteHost: string
-  remotePort: number
-  state: 'forwarding' | 'connecting' | 'failed'
-  error?: string
-  startedAt: number
 }
 
 /** One directory listing entry (remote file browser). */
@@ -210,19 +176,9 @@ export interface ApiErrorBody {
   workspaces?: Array<{ id: string; title: string }>
 }
 
-/** WebSocket terminal protocol frames (host -> client and client -> host). */
-export type TerminalServerFrame =
-  | { type: 'ready'; alias: string }
-  | { type: 'output'; data: string }
-  | { type: 'exit'; code: number | null; error?: string }
-
-export type TerminalClientFrame =
-  | { type: 'input'; data: string }
-  | { type: 'resize'; cols: number; rows: number }
-
 /** Host-side compatibility/degradation state exposed to the client. */
 export type HardsshHealthState = 'ready' | 'degraded' | 'failed'
-export type HardsshHealthFeature = 'sshTools' | 'workspaceCore' | 'fsRouting' | 'subprocessRouting'
+export type HardsshHealthFeature = 'workspaceCore' | 'fsRouting' | 'subprocessRouting'
 export interface HardsshFeatureHealth {
   state: HardsshHealthState
   reason?: string
@@ -248,13 +204,7 @@ export const SSH_API = {
   hosts: SSH_API_BASE + '/hosts',
   importSshConfig: SSH_API_BASE + '/hosts/import-ssh-config',
   test: SSH_API_BASE + '/test',
-  exec: SSH_API_BASE + '/exec',
-  cluster: SSH_API_BASE + '/cluster',
-  upload: SSH_API_BASE + '/upload',
-  download: SSH_API_BASE + '/download',
   ls: SSH_API_BASE + '/ls',
-  tunnel: SSH_API_BASE + '/tunnel',
-  terminal: SSH_API_BASE + '/terminal',
   knownHosts: SSH_API_BASE + '/known-hosts',
   vault: SSH_API_BASE + '/vault',
   sessionSecret: SSH_API_BASE + '/session-secret',
@@ -276,19 +226,3 @@ export interface KnownHostView {
 
 /** Host-key trust actions the browser can perform. */
 export type KnownHostAction = 'trust' | 'forget'
-
-/** NDJSON transfer stream line shapes (upload). */
-export type TransferStreamLine =
-  | { type: 'progress'; progress: TransferProgress }
-  /** The final remote rename is about to start; loss after this point means
-   *  the target's result is unknown until inspected. */
-  | { type: 'commit' }
-  | {
-    type: 'result'
-    ok: boolean
-    transferredBytes?: number
-    error?: string
-    code?: string
-    secret?: 'password' | 'passphrase'
-    hostKeyFingerprint?: string
-  }

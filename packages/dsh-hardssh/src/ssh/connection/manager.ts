@@ -13,7 +13,7 @@ import {
   type KnownHostsStore,
 } from '../known-hosts.ts'
 import { expandHome, type HostStore } from '../store.ts'
-import type { ClusterResult, ExecResult, SshHostEntry, SshHostSummary, TestResult } from '../protocol.ts'
+import type { ExecResult, SshHostEntry, SshHostSummary, TestResult } from '../protocol.ts'
 import type { HostStoreView } from '../../core.ts'
 
 export interface SshInvalidateOptions {
@@ -466,8 +466,8 @@ export interface ConnectionManagerAccess {
   redactOutput?(text: string): string
   /**
    * The one-command runner (the facade's `exec`). Injected rather than
-   * reimplemented here so cluster() fans out through the SAME method surface
-   * callers/spies observe on the engine, and `test` reuses it verbatim.
+   * reimplemented here so `test` (and other in-manager probes) reuse the SAME
+   * method surface callers/spies observe on the engine.
    */
   executor?: (alias: string, command: string, options?: ExecOptions) => Promise<ExecResult>
 }
@@ -1099,106 +1099,6 @@ export class ConnectionManager {
       for (const client of hops) client.end()
       throw error
     }
-  }
-  /**
-   * Run one command against many hosts concurrently.
-   *
-   * Per-host failures carry the typed, secret-free fields declared on
-   * `ClusterResult` (`code`, and `secret` / `hostKeyFingerprint` / `expected` /
-   * `actual` where applicable) alongside the human-readable `error` string, so
-   * automation can branch on a stable code and the GUI can open the right
-   * credential/fingerprint dialog without parsing a localized message.
-   */
-  async cluster(options: {
-    command: string
-    aliases?: string[]
-    environment?: string
-    tags?: string[]
-    timeoutMs?: number
-    maxWorkers?: number
-    /** Aborts every per-host run when the caller disconnects. */
-    signal?: AbortSignal
-  }): Promise<ClusterResult[]> {
-    let targets = this.store.list()
-    if (options.aliases !== undefined && options.aliases.length > 0) {
-      // Explicit target lists are safety-sensitive: reject the WHOLE batch
-      // before executing anything when any alias is unknown. Silently
-      // filtering a typo could otherwise report partial production work as a
-      // successful complete run.
-      const byAlias = new Map(targets.map(entry => [entry.alias, entry]))
-      const unknown = options.aliases.filter(alias => !byAlias.has(alias))
-      if (unknown.length > 0) {
-        throw new Error(`alias '${unknown.join("', '")}' not found — no cluster commands were executed`)
-      }
-      // Preserve the caller's alias order (store order is not contractual).
-      targets = options.aliases.map(alias => byAlias.get(alias)!)
-    }
-    if (options.environment !== undefined && options.environment !== '') {
-      targets = targets.filter(entry => entry.environment === options.environment)
-    }
-    if (options.tags !== undefined && options.tags.length > 0) {
-      // ALL semantics (matches the ssh_cluster tool description).
-      targets = targets.filter(entry => options.tags!.every(tag => entry.tags.includes(tag)))
-    }
-    if (targets.length === 0) return []
-    if (options.maxWorkers !== undefined && (!Number.isInteger(options.maxWorkers) || options.maxWorkers < 1)) {
-      throw new Error('maxWorkers must be a positive integer')
-    }
-    const workers = Math.min(this.opts.defaultMaxWorkers, options.maxWorkers ?? this.opts.defaultMaxWorkers, targets.length)
-    // Pre-sized slots keep the result order aligned with the target order
-    // regardless of which host finishes first.
-    const results = new Array<ClusterResult>(targets.length)
-    const queue = targets.map((entry, index) => ({ entry, index }))
-    const run = async (): Promise<void> => {
-      while (queue.length > 0) {
-        const { entry, index } = queue.shift()!
-        try {
-          const result = await this.executor(entry.alias, options.command, { timeoutMs: options.timeoutMs, signal: options.signal })
-          results[index] = {
-            alias: entry.alias,
-            ok: result.success,
-            exitCode: result.exitCode,
-            timedOut: result.timedOut,
-            stdout: result.stdout,
-            stderr: result.stderr,
-            durationMs: result.durationMs,
-            // A timed-out command ran (and was killed), so it has no failure
-            // code beyond the timeout itself; surface that as a typed code so
-            // automation does not have to infer it from `timedOut`.
-            ...(result.success || result.timedOut !== true ? {} : { code: 'TIMEOUT' as const }),
-          }
-        } catch (error) {
-          results[index] = this.clusterFailure(entry.alias, error)
-        }
-      }
-    }
-    await Promise.all(Array.from({ length: workers }, () => run()))
-    return results
-  }
-
-  /**
-   * Classify one per-host cluster failure: the human-readable `error` string
-   * stays available while the typed reason is added: a NeedsPassword /
-   * host-key failure is interactive in the GUI, and automation needs a stable
-   * code. The message is redacted because connect/resolve errors can embed a
-   * credential; the added fields are fingerprints and enum values only.
-   */
-  clusterFailure(alias: string, error: unknown): ClusterResult {
-    const message = this.redact(error instanceof Error ? error.message : String(error))
-    const base: ClusterResult = { alias, ok: false, error: message }
-    if (error instanceof NeedsPasswordError) {
-      return { ...base, code: 'NEEDS_PASSWORD', secret: error.secret }
-    }
-    if (error instanceof HostKeyUnknownError) {
-      return { ...base, code: 'HOST_KEY_UNKNOWN', hostKeyFingerprint: error.fingerprintSha256 }
-    }
-    if (error instanceof HostKeyMismatchError) {
-      return { ...base, code: 'HOST_KEY_MISMATCH', expected: error.expected, actual: error.actual }
-    }
-    if (error instanceof Error && error.name === 'AbortError') return { ...base, code: 'ABORTED' }
-    if (/alias '.*' not found/.test(message)) return { ...base, code: 'ALIAS_NOT_FOUND' }
-    if (/timed? ?out|timeout/i.test(message)) return { ...base, code: 'TIMEOUT' }
-    return { ...base, code: 'ERROR' }
   }
   /** Probe connectivity: connect, run `true`, close. Typed errors the GUI
    *  must react to (host-key TOFU, session password) are NOT flattened into

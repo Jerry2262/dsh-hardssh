@@ -40,24 +40,23 @@ git grep -nE "https?://" -- packages/dsh-hardssh/src
 
 ## A. "Shell command execution (exec / execSync)"
 
-Seven sites carry the method name `exec`. Six are not local shell execution at all.
+Six sites carry the method name `exec`. Five are not local shell execution at all.
 
 | # | Location | What it actually is |
 |---|---|---|
 | A1 | `src/base/capability.ts:53` | **Interface declaration** — `WorkspaceProcessRuntime.exec(...)`. No body, no shell, no `child_process`. It is the capability type the workspace providers implement. |
 | A2 | `src/ssh/capabilities/service.ts:174` | **Interface declaration** — `RemoteCapabilityDeps.exec(...)`, injected into the remote capability probe. The implementation is A3. |
-| A3 | `src/ssh/engine.ts:298-300` | **Remote execution over the pooled SSH connection** (ssh2 channel): run one command on a host the user configured. Wrapped in a server-side budget (`wrapCommandWithServerBudget`) so a client timeout cannot leave an orphan process on the server. |
+| A3 | `src/ssh/engine.ts:298-300` | **Remote execution over the pooled SSH connection** (ssh2 channel): run one command on the host bound to the current workspace session. Wrapped in a server-side budget (`wrapCommandWithServerBudget`) so a client timeout cannot leave an orphan process on the server. |
 | A4 | `src/ssh/engine.ts:194` | The **binding** that feeds A3 into the capability probe: `exec: (alias, command, options) => this.exec(...)`. Not a second implementation. |
 | A5 | `src/providers/ssh/provider.ts:94` | The SSH provider's `process()` capability factory — returns DSH's `SshSubprocessRuntime` (structured argv/env/stdio + terminal protocol). No local process is started. |
-| A6 | `src/client/ssh/api.ts:135` | **Browser-side wrapper**: `fetch(SSH_API.exec, { method: 'POST', … })` → posts to this plugin's own `/api/dsh-hardssh/ssh/exec`. Runs nothing locally; the server route is loopback + same-origin gated. |
 | A7 | `src/providers/local/provider.ts:305` | The **local workspace-process fallback** for base-only consumers: `child_process.exec(command, { cwd })`. `cwd` is resolved and checked by `assertInsideRoot` **before** the call. |
 
 Who can reach each of these:
 
-- **A3 / A4 / A5** — the `ssh_exec` / `ssh_cluster` agent tools, and `POST /api/dsh-hardssh/ssh/exec`.
-  That route goes through `guard()` (`src/ssh/routes.ts:353`): loopback peer **and** loopback
-  `Host` **and** same-origin `Origin` / `Sec-Fetch-Site`. The WebSocket terminal upgrade
-  applies the same check before `handleUpgrade` (`src/ssh/routes.ts:1017`).
+- **A3 / A4 / A5** — the routed `ctx.subprocess` seam: the agent's `bash` tool and the
+  `workspace.process` capability for the session's bound host. There is no `exec` HTTP route
+  and no agent-visible `ssh_*` tool; the transport is reachable only through the same seam
+  that a local session uses.
 - **A7** — the *in-process* DSH subprocess seam, i.e. the agent's own shell tool inside a
   local workspace session. There is no HTTP route that reaches it. Its command string is a
   shell command line by contract (that is what the harness's bash tool passes); the only

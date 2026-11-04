@@ -264,7 +264,7 @@ describe('search bridge rungs', () => {
     expect(() => h.spawner.spawn(h.spec({ argv: [RG_EXE, '--no-config', '--unknown-bare'] })))
       .toThrow(/client-side search tool and cannot read the remote workspace/)
     expect(() => h.spawner.spawn(h.spec({ argv: [RG_EXE, '--no-config', '--unknown-bare'] })))
-      .toThrow(/remote_search/)
+      .toThrow(/native glob\/grep/)
     expect(h.forward).not.toHaveBeenCalled()
   })
 

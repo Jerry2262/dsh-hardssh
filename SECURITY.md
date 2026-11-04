@@ -6,31 +6,28 @@ repository are expected rather than exploitable.
 
 ## 1. What this plugin is
 
-A DSH (DeepSeek Harness) plugin with two halves:
+A DSH (DeepSeek Harness) plugin that makes a directory on an SSH host usable as a native
+workspace. `cordis.patch.yml` disables the deployment's own `fs-sandbox` / `subprocess` /
+`bash-sandbox` shell rows and this package provides routing facades in their place, so a
+session bound to an SSH workspace has its file I/O and commands executed on that host. A
+local session behaves exactly like the stock rows.
 
-1. **SSH operations** — host management, Web terminal, upload/download, local port
-   forwarding, and the `ssh_exec` / `ssh_cluster` agent tools. Running commands on the remote
-   hosts **the user configured** is the point of this half.
-2. **Workspace routing** — `cordis.patch.yml` disables the deployment's own `fs-sandbox` /
-   `subprocess` rows and this package provides routing facades in their place, so a session
-   bound to an SSH workspace has its file I/O and commands executed on that host. A local
-   session behaves exactly like the stock rows.
-
-Executing commands is therefore **the feature**, not an incident. Everything below is the
-constraint set around it.
+The plugin registers **no agent-facing SSH tools**: the model sees the standard
+`read` / `write` / `edit` / `bash` / `glob` / `grep`, which the seams route to the one host
+bound to the session. Executing commands on that host is therefore **the feature**, not an
+incident; everything below is the constraint set around it.
 
 ## 2. Trust boundaries
 
 | Surface | Constraint | Where |
 |---|---|---|
 | HTTP REST (`/api/dsh-hardssh/ssh/*`, `/api/dsh-hardssh/*`) | loopback peer **and** loopback `Host` header **and** same-origin (`Origin` / `Sec-Fetch-Site`) — a DNS-rebound page cannot reach it | `src/host-http.ts`, `src/routes.ts`, `src/ssh/routes.ts` (`guard()`) |
-| WebSocket terminal upgrade | the same loopback + same-origin check before `handleUpgrade` | `src/ssh/routes.ts` |
 | Host configuration | `~/.dsh/dsh-hardssh-ssh.json`, written `0600` inside a `0700` directory | `src/ssh/store.ts` |
 | Credentials | **not persisted by default** (`secretStorage: none`): session memory only, reused for the lifetime of a pooled connection. Opt-in `vault` mode encrypts with AES-256-GCM + scrypt (`0600`), and that directory is refused by the fs seam even in a bound session | `src/ssh/vault.ts`, `src/fs.ts` (`deniedRoots`) |
 | Host identity | trust-on-first-use; a changed host key re-prompts | `src/ssh/…` |
 | Remote file operations | every path is resolved and confined to the workspace's remote root; a symlink that escapes fails closed | `src/remote/remote-fs.ts` (`confine`) |
 | Local workspace operations | confined to the local workspace root; shell spawns get the same root jail | `src/providers/local/provider.ts` (`assertInsideRoot`) |
-| Command policy (optional) | per-host deny/allow for command **names** and regexes, enforced at the tool layer and at the subprocess seam. Documented as a **guardrail, not a sandbox** | `src/ssh/command-policy.ts` |
+| Command policy (optional) | per-host deny/allow for command **names** and regexes, enforced at the `bash` tool layer and at the subprocess seam. Documented as a **guardrail, not a sandbox** | `src/ssh/command-policy.ts` |
 | Outbound network | only the SSH hosts the user configured — no telemetry, no third-party endpoint anywhere in `src/` | — |
 
 The local OS sandbox does **not** constrain remote execution: a process on the server cannot
@@ -57,7 +54,7 @@ The per-item list — every site the scanner matches, what it is, and who can re
 | Scanner finding | What the code actually is |
 |---|---|
 | `Shell command execution` — `src/base/capability.ts:53`, `src/ssh/capabilities/service.ts:174` | **Interface declarations** (`WorkspaceProcessRuntime.exec`, `RemoteCapabilityDeps.exec`). No implementation, no shell, no `child_process`. The rule matches the method name. |
-| `Shell command execution` — `src/ssh/engine.ts:298-300` | The SSH exec API: run one command on a **user-configured remote host** over the pooled connection, with a server-side budget so a timeout cannot orphan the remote process. Reached by the `ssh_exec` / `ssh_cluster` tools and by the loopback-only `/api/dsh-hardssh/ssh/exec` route. |
+| `Shell command execution` — `src/ssh/engine.ts:298-300` | The internal SSH exec API: run one command on the **host bound to the session** over the pooled connection, with a server-side budget so a timeout cannot orphan the remote process. Reached only through the routed `ctx.subprocess` seam (the agent's shell tool), never from an HTTP route or an agent-visible SSH tool. |
 | `Shell command execution` — `src/providers/local/provider.ts:305` | Local workspace-process fallback for base-only consumers: `child_process.exec(command, { cwd })` **after** `assertInsideRoot`. The command string arrives from the in-process DSH subprocess seam (the agent's own shell tool), never from an HTTP request. |
 | `Child process module usage` — `src/providers/local/provider.ts:140/142` | Delegation to DSH's `LocalSubprocessRuntime`, cwd root-jailed first. `node:child_process` is imported in exactly one source file (the standalone fallback above). |
 | `Reference to .ssh credentials` — `src/client/ssh/locales.ts:57/227` | **UI hint strings** only. They used to name a default private-key file as the example; they now describe the field generically, so no credential path or key filename is embedded. No file access was involved either way. |
@@ -79,8 +76,8 @@ otherwise.
 命中 `exec` 方法名、`child_process` 导入这类能力面条目——它们不是漏洞，也不是密钥或地址泄露：
 
 - 命中的两处 `exec` 只是**接口声明**，没有实现、没有 shell；
-- `ssh/engine.ts` 的 `exec` 是 SSH 命令 API，HTTP 入口限本机回环 + 同源，WebSocket 终端升级同
-  样先过这道闸；
+- `ssh/engine.ts` 的 `exec` 是内部 SSH 命令 API，只经被替换的 `ctx.subprocess` seam（agent 的
+  shell 工具）到达，没有 HTTP 入口，也不再注册 `ssh_*` 工具；
 - 本地回退实现会先把 cwd 收敛到工作区根（`assertInsideRoot`），命令串来自进程内的 DSH
   subprocess seam，不经 HTTP；
 - `.ssh` 命中只是界面提示文案（已改写为不带 `.ssh` 路径的通用提示）；
