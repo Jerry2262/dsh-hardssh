@@ -284,6 +284,8 @@ pnpm test:vault                                  # 只跑 vault 加密用例（~
 
 项目级 skill 放在 `.dsh/skills/`（新会话启动时 DSH 会自动发现并把 description 注入上下文，按需加载全文）。当前有一个 `dsh-session-triage`：定位/解码/对比会话日志，含 `.dsh/skills/dsh-session-triage/scripts/` 下的多帧 zstd 解码与执行流摘要脚本，排查「某个会话为什么失败、两个 tmp 工作区执行流是否一致」时先用它。
 
+历史遗留问题、待决策项、已接受的风险和踩过的坑都记录在 [LEGACY.md](./LEGACY.md)；动 `dsh-ssh` 命名、权限语义或工具集之前先读一遍。
+
 部署：profile 用 `link:` 指向本仓库，构建后重启 `dsh web` 即生效。
 
 ## FAQ
