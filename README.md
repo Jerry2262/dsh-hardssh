@@ -12,7 +12,7 @@ DSH 的文件与进程访问集中在 `ctx.fs` / `ctx.subprocess` 两个服务�
 - `hardssh-subprocess`：替换 `subprocess`，远端模式走远端 `workspace.process` capability，客户端原生二进制（`pwsh` 等）仍在本机；
 - `hardssh-shell`：替换 `bash-sandbox` 的 shell 执行器，远端命令经 SSH 执行，并由自动部署的 Landlock 启动器按会话权限 preset 约束。
 
-SSH 工作区的 anchor 目录位于 `~/.dsh/ssh-workspaces/<id>`；会话 cwd 落在 anchor 下时即视为远端会话。所有路径按远端根收敛，symlink 逃逸 fail closed。
+SSH 工作区的 anchor 目录位于 `~/.dsh/workspace-anchors/<id>`（旧版为 `~/.dsh/ssh-workspaces/<id>`，现有工作区继续兼容）；会话 cwd 落在 anchor 下时即视为远端会话。所有路径按远端根收敛，symlink 逃逸 fail closed。会话的系统提示里不含任何 SSH、主机或连接配置信息：模型只看到标准工具和本会话的 cwd。
 
 ## 能力
 
@@ -50,8 +50,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 
 | Key | Type | Default | 含义 |
 | --- | --- | --- | --- |
-| `announceToAgent` | boolean | `true` | 是否向会话注入工作区公告（说明当前目录在远端、bash 在远端执行） |
-| `enabled` | boolean | `true` | SSH 工作区界面开关：控制工作区 CRUD 路由与公告；连接配置路由、fs/subprocess seam 与连接池不受影响 |
+| `enabled` | boolean | `true` | SSH 工作区界面开关：控制工作区 CRUD 路由与工作区面板；连接配置路由、fs/subprocess seam 与连接池不受影响 |
 | `secretStorage` | enum | `none` | 凭据策略：`none` = 密码不落盘、连接时输入；`vault` = AES-256-GCM + scrypt 加密存储 |
 | `vaultAutoUnlock` | enum | `off` | 是否允许用 `DSH_CREDENTIAL_PASSWORD` 在加载时自动解锁 vault；默认关闭 |
 
@@ -74,7 +73,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 
 - 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600；旧 `dsh-ssh.json` 首次启动自动迁移）
 - 加密凭据：`~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`（被 fs seam 拒绝访问）
-- 工作区台账：`~/.dsh/workspaces/index.v1.json`；anchor：`~/.dsh/workspaces/anchors`、`~/.dsh/ssh-workspaces/`
+- 工作区台账：`~/.dsh/workspaces/index.v1.json`；anchor：`~/.dsh/workspaces/anchors`、`~/.dsh/workspace-anchors/`（旧版 `~/.dsh/ssh-workspaces/` 继续兼容）
 - 主机密钥信任：`~/.dsh/ssh-known-hosts.json`
 
 ## 开发
@@ -86,7 +85,7 @@ pnpm test          # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-默认测试基线：667 通过 + 1 skipped（live SSH opt-in）。历史遗留与待决策项见 [LEGACY.md](./LEGACY.md)，安全边界见 [SECURITY.md](./SECURITY.md)，适配手册见 [SKILLS.md](./SKILLS.md)。
+默认测试基线：664 通过 + 1 skipped（live SSH opt-in）。历史遗留与待决策项见 [LEGACY.md](./LEGACY.md)，安全边界见 [SECURITY.md](./SECURITY.md)，适配手册见 [SKILLS.md](./SKILLS.md)。
 
 ## FAQ
 

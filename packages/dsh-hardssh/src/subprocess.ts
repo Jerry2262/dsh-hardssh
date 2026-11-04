@@ -14,7 +14,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { LocalSubprocessRuntime } from '@deepseek-ai/dsh-subprocess-local'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
-import { anchorRoot, isPathUnderAnchor } from './ledger.ts'
+import { anchorRoots, isPathUnderAnchor } from './ledger.ts'
 import { SwitchSubprocessRuntime } from './switch/switch-subprocess.ts'
 import { translateAnchorPath } from './switch/anchor-path.ts'
 import type { WorkspaceCore } from './runtime/workspace-core.ts'
@@ -73,7 +73,8 @@ export function apply(ctx: Context): void {
   const localCtx = ctx.isolate('subprocess')
   const localSubprocess = new LocalSubprocessRuntime(localCtx)
   const workspaceCore = (): WorkspaceCore | undefined => ctx.get('workspaceCore') as WorkspaceCore | undefined
-  const anchorRootDir = anchorRoot()
+  const anchorRootDirs = anchorRoots()
+  const underAnchor = (path: string | undefined): boolean => path !== undefined && path !== '' && anchorRootDirs.some(root => isPathUnderAnchor(root, path))
   const atMount = workspaceCore()
   const setHealth = bindHardsshHealthFeature(ctx, 'subprocessRouting', atMount?.isReady() === true
     ? { state: 'ready' }
@@ -117,7 +118,7 @@ export function apply(ctx: Context): void {
           state: 'degraded',
           reason: ws === undefined ? 'workspaceCore is unavailable; local subprocess fallback is active' : 'workspaceCore failed or is still initializing; local subprocess fallback is active',
         })
-        if (cwd !== undefined && isPathUnderAnchor(anchorRootDir, cwd)) {
+        if (underAnchor(cwd)) {
           if (!warnedUnready) {
             warnedUnready = true
             console.warn('[dsh-hardssh] subprocess routing is not ready — local subprocess remains available, but execution beneath the workspace anchor root is refused')
@@ -127,9 +128,9 @@ export function apply(ctx: Context): void {
         return undefined
       }
       markReady()
-      const runtime = genericSubprocessFor(ws, cwd, [anchorRootDir])
+      const runtime = genericSubprocessFor(ws, cwd, anchorRootDirs)
       if (runtime !== undefined) return runtime
-      if (cwd !== undefined && isPathUnderAnchor(anchorRootDir, cwd)) {
+      if (underAnchor(cwd)) {
         throw new Error(`subprocess-ssh: '${cwd}' is inside the workspace anchor root but no registered workspace owns it (fail closed)`)
       }
       return undefined

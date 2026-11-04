@@ -27,7 +27,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type {} from '@deepseek-ai/dsh-settings'
-import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -48,7 +47,6 @@ import { Vault } from './ssh/vault.ts'
 import { mountWorkspaceCore, genericLedgerPath, type WorkspaceCore } from './runtime/workspace-core.ts'
 import { mountHardsshHealth, watchHardsshOptionalServices } from './runtime/health.ts'
 import { inspectGenericLedger, recoverGenericLedger } from './runtime/workspace-recovery.ts'
-import type { SshWorkspaceRecord } from './protocol.ts'
 
 /** Stable cordis plugin name. */
 export const name = 'hardssh'
@@ -66,14 +64,12 @@ export interface Config {
   /**
    * Workspace-surface switch (default on). It gates the SSH-workspace
    * surfaces this row mounts after the check below: the /api/dsh-hardssh
-   * workspace CRUD routes and the workspace announcement section. The
-   * connection-configuration routes, the shared engine/host-store/vault, the
-   * fs/subprocess routing rows, and the seam replacement itself mount before
-   * this switch and keep running (a workspace must be creatable/connectable).
+   * workspace CRUD routes and the workspace panel. The connection-configuration
+   * routes, the shared engine/host-store/vault, the fs/subprocess routing rows,
+   * and the seam replacement itself mount before this switch and keep running
+   * (a workspace must be creatable/connectable).
    */
   enabled: boolean
-  /** Whether the (single-workspace) remote-routing announcement is mounted. */
-  announceToAgent: boolean
   /**
    * Secret storage mode: 'none' (default, VSCode Remote-SSH style: passwords
    * never persisted, prompted once per session) or 'vault' (encrypted at
@@ -97,7 +93,6 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
-  announceToAgent: z.boolean().default(true),
   secretStorage: z.union([z.const('none'), z.const('vault')]).default('none'),
   vaultAutoUnlock: z.union([z.const('off'), z.const('env')]).default('off'),
 })
@@ -147,52 +142,6 @@ export async function bootstrapGenericWorkspaceCore(core: WorkspaceCore, options
     }
   }
   await core.initialize()
-}
-
-/** Order of the announcement section (right after the plugin:dsh-hardssh-ssh section at 150). */
-const SECTION_ORDER = 160
-
-/** Minimal shape of the assembly context the guidance section reads. The DSH
- *  type (`AssembleContext`) only declares scope/signal, but the agent loop
- *  passes `{ agent, scope, signal }` (see dsh-agent assembleContextFor). */
-interface GuidanceAssemblyContext {
-  agent?: { session?: { header?: { cwd?: string } } }
-}
-
-/** Render the workspace guidance from the RECORD SOURCE for this session:
- *  a cwd the store binds renders the remote branch (with the real alias /
- *  remote root), everything else the local branch. No path-string matching. */
-function renderWorkspaceGuidance(workspaces: WorkspaceStoreView, context: unknown): string {
-  const agent = (context as GuidanceAssemblyContext).agent
-  const cwd = agent?.session?.header?.cwd
-  const record = cwd === undefined || cwd === '' ? undefined : workspaces.findByAnchorSync(cwd)
-  if (record === undefined) return localGuidance()
-  return remoteGuidance(record)
-}
-
-/** Local-session branch of the announcement. Exported for the guidance test. */
-export function localGuidance(): string {
-  return '本机已安装 dsh-hardssh 插件（SSH 工作区）。当前会话是本机工作区：正常使用全部工具（pwsh / bash / glob / grep / read / write / edit），文件操作与 bash 命令都在本机执行。需要把远端目录当作工作区时，在「SSH 工作区」面板添加并在对应会话中操作。用户提到「SSH 工作区 / 远程工作区 / 远程项目」时即指本插件。'
-}
-
-/**
- * SSH-bound-session branch of the announcement.
- *
- * The tool facts here must match the seams. read/write/edit and bash route to
- * the remote host (bash runs through the remote Landlock launcher under the
- * session's permission preset); glob/grep are served by the remote workspace
- * search bridge. `pwsh` is a client-native binary and still runs on this
- * machine. The announcement must say that bash itself is remote: without it a
- * model calls the remote result "本机" and cannot tell the two worlds apart.
- *
- * Exported for the guidance test.
- */
-export function remoteGuidance(record: SshWorkspaceRecord): string {
-  return `本机已安装 dsh-hardssh 插件（SSH 工作区）。当前会话的工作区在远端主机 \`${record.alias}\` 的 ${record.remoteRoot}：
-- read / write / edit / bash / glob / grep 都直接作用于这个远端目录，用法与本地工作区一致；路径用远端绝对路径（如 ${record.remoteRoot}/src/main.ts），相对路径以远端根目录为基准。
-- bash 命令在远端执行，文件写入由远端 Landlock 沙箱按会话权限 preset 约束；超出工作区根的路径会被拒绝。
-- pwsh / powershell / cmd 是客户端原生二进制，在本机执行；远端为 POSIX 主机时请用 bash 语义命令。
-- 远程操作消耗真实远程资源，先确认再执行。`
 }
 
 /**
@@ -286,7 +235,6 @@ export async function reconcileHostWorkspacesOnStartup(deps: HostWorkspaceReconc
 export function apply(ctx: Context, config?: Config): void {
   const resolved = {
     enabled: config?.enabled ?? true,
-    announceToAgent: config?.announceToAgent ?? true,
     // Secret storage: 'none' (VSCode Remote-SSH style; default) or 'vault'.
     // Single-sourced: the Vault/SecureHostStore below are built from THIS value.
     secretStorage: resolveSecretStorageMode(config),
@@ -481,17 +429,4 @@ export function apply(ctx: Context, config?: Config): void {
   // (server data remote, declared client roots local — skills readable),
   // and client-native binaries (pwsh.exe etc.) spawn locally via the
   // subprocess switch. See switch-fs.ts / switch-subprocess.ts.
-
-  if (resolved.announceToAgent) {
-    // Optional integration (see the inject note above): no system-prompt
-    // service means no announcement, never a failed plugin load.
-    const systemPrompt = ctx.get('systemPrompt') as { section?: (options: { name: string; order: number; text: (context: unknown) => string }) => unknown } | undefined
-    if (typeof systemPrompt?.section === 'function') {
-      systemPrompt.section({
-        name: 'plugin:dsh-hardssh',
-        order: SECTION_ORDER,
-        text: (context) => renderWorkspaceGuidance(workspaces, context as never),
-      })
-    }
-  }
 }

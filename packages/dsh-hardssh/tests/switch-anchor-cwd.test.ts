@@ -164,7 +164,7 @@ describe('project-root walk with a POSIX anchor (the walk must never abort)', ()
     } as unknown as FileSystem
     const facade = new SwitchFileSystem(new Context(), {
       local: localFs,
-      worldForAnchorPath: (path) => anchorWorldFor(core, anchorRootDir, path),
+      worldForAnchorPath: (path) => anchorWorldFor(core, [anchorRootDir], path),
       worldFor: (cwd) => genericFsWorldFor(core, cwd, [anchorRootDir]) ?? { backend: localFs, namespace: '' },
       worldForNamespace: (namespace) => genericFsWorldForNamespace(core, namespace),
     })

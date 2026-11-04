@@ -346,7 +346,7 @@ describe('anchor-window probes answer NOT FOUND (regression: a run aborted with 
     } as unknown as FileSystem
     const facade = new SwitchFileSystem(new Context(), {
       local: localFs,
-      worldForAnchorPath: (path) => anchorWorldFor(generic.core, anchorRootDir, path),
+      worldForAnchorPath: (path) => anchorWorldFor(generic.core, [anchorRootDir], path),
       worldFor: (cwd) => genericFsWorldFor(generic.core, cwd, [anchorRootDir]) ?? { backend: localFs, namespace: '' },
       worldForNamespace: (namespace) => genericFsWorldForNamespace(generic.core, namespace),
     })

@@ -2,7 +2,7 @@
  * Sidebar "工作区文件" (native file panel) address rewrite: the panel anchors
  * its displayed root at the session's header cwd, which for an SSH-bound
  * workspace is the LOCAL anchor directory — so the panel breadcrumb/title shows
- * `~/.dsh/ssh-workspaces/<id>/…` instead of the real remote directory.
+ * `~/.dsh/workspace-anchors/<id>/…` instead of the real remote directory.
  *
  * The panel's CONTENT is already remote (the fs seam resolves anchor→remote);
  * only the displayed address is wrong. This is a pure-DOM augmentation (the

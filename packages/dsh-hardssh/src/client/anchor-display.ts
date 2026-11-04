@@ -7,7 +7,7 @@
  * native file-panel header (`workspace-files-path.ts`). Each used to carry its
  * own separator normalization, case-folding rule and prefix rewrite — the exact
  * shape of drift that leaves one surface saying `/data/app` while the other
- * still says `C:\\Users\\…\\.dsh\\ssh-workspaces\\<id>`.
+ * still says `C:\\Users\\…\\.dsh\\workspace-anchors\\<id>`.
  *
  * This module owns those rules once. Pure functions only: the DOM walks stay in
  * the two surfaces, so both remain testable without a browser.

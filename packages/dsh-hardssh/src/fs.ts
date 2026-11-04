@@ -20,7 +20,7 @@ import { FsError } from '@deepseek-ai/dsh-fs'
 import type { FileSystem } from '@deepseek-ai/dsh-fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { anchorRoot, isPathUnderAnchor } from './ledger.ts'
+import { anchorRoots, isPathUnderAnchor } from './ledger.ts'
 import { vaultDirectory } from './ssh/vault.ts'
 import { WFS_NAMESPACE_MARKER, SwitchFileSystem, type WorkspaceWorld } from './switch/switch-fs.ts'
 import type { WorkspaceCore } from './runtime/workspace-core.ts'
@@ -117,10 +117,10 @@ export function refuseUnownedAnchorPath(path: string): never {
  * anchor path (this session's or a SIBLING's), else the anchor-window refusal.
  * Exported so the seam can be exercised without re-implementing the policy.
  */
-export function anchorWorldFor(core: WorkspaceCore, anchorRootDir: string, path: string): WorkspaceWorld | undefined {
-  const world = genericFsWorldFor(core, path, [anchorRootDir])
+export function anchorWorldFor(core: WorkspaceCore, anchorRootDirs: readonly string[], path: string): WorkspaceWorld | undefined {
+  const world = genericFsWorldFor(core, path, anchorRootDirs)
   if (world !== undefined) return world
-  if (isPathUnderAnchor(anchorRootDir, path)) refuseUnownedAnchorPath(path)
+  if (anchorRootDirs.some(root => isPathUnderAnchor(root, path))) refuseUnownedAnchorPath(path)
   return undefined
 }
 
@@ -132,7 +132,8 @@ export function apply(ctx: Context): void {
     diffBasisMaxBytes: 10 * 1024 * 1024,
   })
   const workspaceCore = (): WorkspaceCore | undefined => ctx.get('workspaceCore') as WorkspaceCore | undefined
-  const anchorRootDir = anchorRoot()
+  const anchorRootDirs = anchorRoots()
+  const underAnchor = (path: string | undefined): boolean => path !== undefined && path !== '' && anchorRootDirs.some(root => isPathUnderAnchor(root, path))
   const atMount = workspaceCore()
   const setHealth = bindHardsshHealthFeature(ctx, 'fsRouting', atMount?.isReady() === true
     ? { state: 'ready' }
@@ -166,9 +167,9 @@ export function apply(ctx: Context): void {
   new SwitchFileSystem(ctx, {
     local: localFs,
     localRoots: [dshHomePath(), join(homedir(), '.agents')],
-    // The anchor root is a window of placeholder dirs that must never be
-    // treated as local infrastructure even though it lives under ~/.dsh.
-    localRootExclusions: [anchorRootDir],
+    // The anchor roots are windows of placeholder dirs that must never be
+    // treated as local infrastructure even though they live under ~/.dsh.
+    localRootExclusions: [...anchorRootDirs],
     // The credential vault is REFUSED outright on every dispatch path (not only
     // resolve/lstat): a bound session's agent must not be able to read — and
     // offline-attack — the ciphertext through the routed filesystem. The
@@ -180,11 +181,11 @@ export function apply(ctx: Context): void {
       if (ws === undefined) {
         // The replacement row must stay mounted, but the managed anchor window
         // must never fall through to the client filesystem without its router.
-        if (isPathUnderAnchor(anchorRootDir, path)) refuseUnownedAnchorPath(path)
+        if (underAnchor(path)) refuseUnownedAnchorPath(path)
         return undefined
       }
       if (ws.isReady()) markReady()
-      return anchorWorldFor(ws, anchorRootDir, path)
+      return anchorWorldFor(ws, anchorRootDirs, path)
     },
     worldFor: (cwd) => {
       const ws = workspaceCore()
@@ -193,7 +194,7 @@ export function apply(ctx: Context): void {
           state: 'degraded',
           reason: ws === undefined ? 'workspaceCore is unavailable; local filesystem fallback is active' : 'workspaceCore failed or is still initializing; local filesystem fallback is active',
         })
-        if (cwd !== undefined && isPathUnderAnchor(anchorRootDir, cwd)) {
+        if (underAnchor(cwd)) {
           if (!warnedUnready) {
             warnedUnready = true
             console.warn('[dsh-hardssh] fs routing is not ready — local filesystem remains available, but access beneath the workspace anchor root is refused')
@@ -203,9 +204,9 @@ export function apply(ctx: Context): void {
         return { backend: localFs, namespace: '' }
       }
       markReady()
-      const world = genericFsWorldFor(ws, cwd, [anchorRootDir])
+      const world = genericFsWorldFor(ws, cwd, anchorRootDirs)
       if (world !== undefined) return world
-      if (cwd !== undefined && isPathUnderAnchor(anchorRootDir, cwd)) {
+      if (underAnchor(cwd)) {
         // Deliberately NOT the FS_NOT_FOUND refusal above: `cwd` is the session's
         // own identity, not a path being probed. An unowned cwd means the
         // workspace was deleted out from under a live session, which must stay

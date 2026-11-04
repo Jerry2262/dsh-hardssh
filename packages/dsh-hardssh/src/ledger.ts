@@ -28,10 +28,24 @@ export function normalizeRemoteRoot(raw: string): string {
   return normalized === '/' ? '/' : normalized.replace(/\/+$/, '')
 }
 
-/** Anchor roots: ~/.dsh/ssh-workspaces/<id>/ — visible in the sidebar as
- *  ordinary host workspaces (and thus selectable for sessions). */
+/** Anchor roots: `~/.dsh/workspace-anchors/<id>/` — visible in the sidebar as
+ *  ordinary host workspaces (and thus selectable for sessions). The name is
+ *  deliberately neutral: it is part of a session's cwd, so it must not say
+ *  anything about how the files are reached. */
 export function anchorRoot(): string {
+  return dshHomePath('workspace-anchors')
+}
+
+/** Pre-rename anchor root (`~/.dsh/ssh-workspaces`). Existing workspaces keep
+ *  their record's anchor path; this root stays recognised so those sessions
+ *  still route and fail closed correctly. New workspaces never use it. */
+export function legacyAnchorRoot(): string {
   return dshHomePath('ssh-workspaces')
+}
+
+/** Every anchor root the routing facades must treat as reserved. */
+export function anchorRoots(): readonly string[] {
+  return [anchorRoot(), legacyAnchorRoot()]
 }
 
 /** The anchor directory for one id. */

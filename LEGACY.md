@@ -12,13 +12,13 @@
 - **远端 Landlock 只能部分强制**（aliyun 内核 Landlock ABI 较旧）：`read-only` / `workspace-write` 在远端生效，但 stderr 会打印 `landlock-run: partial enforcement (older Landlock ABI)`，实际约束力弱于完整 enforce，且当前只在 aliyun + WSL 两台机器上观察过。**已接受**。
 - **远端 subprocess seam 的覆盖范围取决于消费者**：被替换的 `ctx.subprocess` 可以让任意插件在绑定会话里 spawn 远端进程；Landlock 约束来自本插件部署的 `landlock-run` 执行器，`commandPolicy` 只是按命令名/正则拦截的护栏，绕过方式（`$(…)`、base64、脚本调用）都成立。**已接受**。
 - **`danger-full-access` 下远端 `write` / `edit` 仍被限制在远端工作区根**：`write-fence` 对 danger 放行（[src/sandbox/write-fence.ts](packages/dsh-hardssh/src/sandbox/write-fence.ts) 第 30 行），但 `RemoteFileSystem.confineRoot` 无条件拒绝根外路径（[src/remote/remote-fs.ts](packages/dsh-hardssh/src/remote/remote-fs.ts) 第 178 行，`workspace.ssh-outside-root`）；本地 danger 不限制路径，两者语义不一致。**待办**（优先级低）。
-- **`RemoteFileSystem` 的可用范围是远端工作区根**：读取也受 `confineRoot` 约束（例如读 `/etc/os-release` 会被拒）；模型容易误以为能读任意远端路径，公告已写明"超出工作区根的路径会被拒绝"。**已接受**。
+- **`RemoteFileSystem` 的可用范围是远端工作区根**：读取也受 `confineRoot` 约束（例如读 `/etc/os-release` 会被拒）；模型不知道这一限制，可能尝试读根外路径并收到拒绝。**已接受**。
 - **arm64 `landlock-run` 资产未在真机验证过**：目前只有 x86_64 的 aliyun + WSL 实测。**待办**（缺少 ARM 主机）。
 - **0.1.x 宿主不支持 `hardssh-shell`**：`apply()` 的前置版本检查会拒绝挂载，而不是降级。自用只跑 0.2.x。**已接受**。
 
 ## 2. 测试覆盖
 
-- **live SSH 用例默认跳过**（需 `DSH_LIVE_SSH=1`）：默认套件不覆盖真实远端，CI 也没有真实 SSH；当前默认基线 667 通过 + 1 skipped，真实远端行为只靠手工会话验收。**已接受**。
+- **live SSH 用例默认跳过**（需 `DSH_LIVE_SSH=1`）：默认套件不覆盖真实远端，CI 也没有真实 SSH；当前默认基线 664 通过 + 1 skipped，真实远端行为只靠手工会话验收。**已接受**。
 
 ## 3. DSH 版本跟随
 
@@ -33,3 +33,7 @@
 
 - **测试服务进程可能不在 bash 沙箱的 PID namespace 里**：`ps` / `lsof` 看不到，不能据此判断服务死活；端口探测（`curl` 返回 401 表示进程活着但需要鉴权）才可信。旧 3099 进程曾只能由外部终端停掉。**已接受**。
 - **`/tmp` 在 bash 工具里可能是 bwrap 私有目录**：跨调用不持久，脚本产物需要写到仓库内（`.dsh-e2e/tmp/`、`.dsh-e2e/transcripts/`）。**已接受**。
+
+## 6. 会话可见性（与 VS Code Remote-SSH 的差距）
+
+- **会话 cwd 是本地 anchor，不是远端绝对路径**：远端会话的运行上下文显示 `~/.dsh/workspace-anchors/<id>`（旧工作区仍显示 `~/.dsh/ssh-workspaces/<id>`），而 `bash` 在远端执行、`pwd` 返回远端根（如 `/home/jerry/tmp`）。同一会话里这两个路径值不一致；模型若直接引用运行时 cwd，会与命令输出矛盾。实测（`session-94f3357b-67bc-4da1-b56f-506717d4fed2`）：bash 的 `pwd` 返回 `/home/jerry`，运行上下文 cwd 是测试 anchor，模型在回答里明确指出了两者不一致。**已接受**（不做宿主级虚拟路径改造）。

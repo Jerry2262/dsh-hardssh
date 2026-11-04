@@ -22,7 +22,7 @@ import { SandboxUnavailableError, classifyRunnerFailure, isRunnerSpawnFailure, m
 import type { ConfinedArgv, ConfinedSandboxMode, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { ShellExecRequest, ShellExecSpec, ShellExecution, ShellRunResult, ShellSandboxInfo } from '@deepseek-ai/dsh-shell'
-import { anchorRoot, isPathUnderAnchor } from './ledger.ts'
+import { anchorRoots, isPathUnderAnchor } from './ledger.ts'
 import { shellQuote } from './shell.ts'
 import type { WorkspaceCore } from './runtime/workspace-core.ts'
 import type { RemoteSandboxProvisioner } from './sandbox/remote-sandbox.ts'
@@ -89,25 +89,26 @@ function worldFromAnchor(core: WorkspaceCore, cwd: string): RemoteShellWorld | u
  */
 function remoteWorldFor(ctx: Context, spec: ShellExecSpec): RemoteShellWorld | undefined {
   const core = ctx.get('workspaceCore') as WorkspaceCore | undefined
-  const anchorDir = anchorRoot()
+  const anchorDirs = anchorRoots()
+  const underAnchor = (path: string): boolean => anchorDirs.some(root => isPathUnderAnchor(root, path))
   const workdir = spec.workdir
   const policyRoot = spec.sandboxPolicy?.workspaceRoot
   if (core === undefined || !core.isReady()) {
-    if (isPathUnderAnchor(anchorDir, workdir) || (policyRoot !== undefined && isPathUnderAnchor(anchorDir, policyRoot))) {
+    if (underAnchor(workdir) || (policyRoot !== undefined && underAnchor(policyRoot))) {
       throw new Error('shell-ssh: workspace routing is unavailable while the workspace core is not ready (anchor path fails closed)')
     }
     return undefined
   }
-  if (policyRoot !== undefined && isPathUnderAnchor(anchorDir, policyRoot)) {
+  if (policyRoot !== undefined && underAnchor(policyRoot)) {
     const world = worldFromAnchor(core, policyRoot)
     if (world === undefined) {
       throw new Error(`shell-workspace: '${policyRoot}' is inside the workspace anchor root but no registered workspace owns it (fail closed)`)
     }
-    if (isPathUnderAnchor(anchorDir, workdir)) return world
+    if (underAnchor(workdir)) return world
     if (workdir.startsWith('/')) return { ...world, remoteWorkdir: workdir }
     throw new Error(`shell-workspace: workdir '${workdir}' is not an absolute POSIX path for an SSH-bound session`)
   }
-  if (isPathUnderAnchor(anchorDir, workdir)) {
+  if (underAnchor(workdir)) {
     const world = worldFromAnchor(core, workdir)
     if (world !== undefined) return world
     throw new Error(`shell-workspace: '${workdir}' is inside the workspace anchor root but no registered workspace owns it (fail closed)`)

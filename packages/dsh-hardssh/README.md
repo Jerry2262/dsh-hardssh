@@ -8,7 +8,7 @@
 
 - **对插件和工具零改动**：`cordis.patch.yml` 禁用部署自带的 `fs-sandbox` / `subprocess` 行，由本包的 `hardssh-fs` / `hardssh-subprocess` / `hardssh-shell` 提供路由门面。任何走标准 `ctx.fs` / `ctx.subprocess` 的插件与标准工具，在 SSH 工作区会话里自动运行在远端；本地会话不受影响。
 - **单一共享实例**：`HostStore` + `SshEngine`（ssh2 连接池）在 `src/index.ts` 创建一次；主机配置变更会失效相关连接。
-- **会话绑定通过 cwd**：SSH 工作区的 anchor 在 `~/.dsh/ssh-workspaces/<id>`，`SwitchFileSystem` / 路由门面按会话 cwd 判断是否路由到远端；`workspace.fs` / `workspace.process` capability 负责实际远端 I/O。
+- **会话绑定通过 cwd**：SSH 工作区的 anchor 在 `~/.dsh/workspace-anchors/<id>`（旧版 `~/.dsh/ssh-workspaces/<id>` 继续兼容），`SwitchFileSystem` / 路由门面按会话 cwd 判断是否路由到远端；`workspace.fs` / `workspace.process` capability 负责实际远端 I/O。会话系统提示不含 SSH/主机/连接信息。
 - **远端搜索**：`glob` / `grep` 在绑定会话里直接查远端（宿主机有 ripgrep 时执行同一条 rg；否则走搜索阶梯），不会把本机结果冒充服务器内容。
 - **远端沙箱**：首次连接时自动上传 `landlock-run` 启动器；`read-only` / `workspace-write` preset 在远端生效（较旧内核为 partial enforcement，stderr 可见）。
 - **公开入口**：`@tiphareth/dsh-hardssh/base`（通用底座）、`@tiphareth/dsh-hardssh/workspace`（平台无关类型面）。
@@ -46,7 +46,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 
 - 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600；旧 `dsh-ssh.json` 首次启动自动迁移）
 - 加密凭据（`secretStorage: vault`）：`~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`
-- 工作区台账与 anchor：`~/.dsh/workspaces/index.v1.json`、`~/.dsh/workspaces/anchors`、`~/.dsh/ssh-workspaces/`
+- 工作区台账与 anchor：`~/.dsh/workspaces/index.v1.json`、`~/.dsh/workspaces/anchors`、`~/.dsh/workspace-anchors/`（旧版 `ssh-workspaces/` 继续兼容）
 - 主机密钥信任：`~/.dsh/ssh-known-hosts.json`
 
 ## 安全模型
@@ -65,7 +65,7 @@ pnpm test        # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-测试基线：667 通过 + 1 skipped（live SSH opt-in）。项目历史与遗留问题见仓库根目录 [LEGACY.md](../../LEGACY.md)。
+测试基线：664 通过 + 1 skipped（live SSH opt-in）。项目历史与遗留问题见仓库根目录 [LEGACY.md](../../LEGACY.md)。
 
 ## License
 

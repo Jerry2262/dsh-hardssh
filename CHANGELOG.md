@@ -4,10 +4,18 @@
 
 ## 未发布
 
+### 定位对齐：会话不再感知 SSH，anchor 路径去语义化
+
+- 删除 `localGuidance` / `remoteGuidance` 两段 system prompt 注入，删除 `announceToAgent` 配置项；本地会话与远端会话的模型可见上下文除 cwd 值外一致，不再出现「SSH / 远端主机 / 主机别名 / bash 在远端」等字样。连接配置、主机指纹、密码提示只存在于操作侧 UI。
+- 新 SSH 工作区的 anchor 根由 `~/.dsh/ssh-workspaces/<id>` 改为中性路径 `~/.dsh/workspace-anchors/<id>`，避免会话 cwd 字符串带 SSH 含义；旧 root 继续被识别（已有工作区记录里的 anchor 路径照常路由），不做强制迁移。
+- 会话存档仍全部保存在本地 `$DSH_HOME/sessions/<encoded-cwd>/`，规则与本地工作区一致。
+- 测试：删除公告测试，anchor 根保留旧 root 兼容；默认套件 **664 通过 + 1 skipped**（live SSH opt-in），typecheck/build 通过。
+- 已知差距（记录于 LEGACY §6）：会话 cwd 仍是本地 anchor 而非远端绝对路径，`bash pwd` 返回远端路径，两者可能不一致。
+
 ### 定位收窄：删除多主机 SSH 运维面，只保留「远端目录 = 工作区」
 
 - 与官方 `@deepseek-ai/dsh-ssh` 的单远端世界不同，本插件保留按会话绑定远端工作区的透明路由，但不再同时承担多主机运维：一个会话只感知当前工作区对应的那一台主机。
-- 删除 6 个 `ssh_*` 工具（list/exec/upload/download/tunnel/cluster）与 3 个 `remote_*` 工具（status/ls/search）；删除 SSH 运维系统提示段落与 `dsh-hardssh` 设置命名空间（配置只保留插件 Config 的 `enabled`/`announceToAgent`/`secretStorage`/`vaultAutoUnlock`）。
+- 删除 6 个 `ssh_*` 工具（list/exec/upload/download/tunnel/cluster）与 3 个 `remote_*` 工具（status/ls/search）；删除 SSH 运维系统提示段落与 `dsh-hardssh` 设置命名空间（配置只保留插件 Config 的 `secretStorage` / `vaultAutoUnlock` / `enabled`）。
 - 删除运维 HTTP 面：`exec` / `cluster` / `upload` / `download` / `tunnel` / `terminal`（含 WebSocket 升级）；客户端删除右侧「SSH 运维」Tab、终端/传输/隧道/集群面板及 `@xterm/*`、`ws` 依赖。
 - 保留工作区创建/连接所需的最小面：hosts CRUD、ssh-config 导入、known-hosts、vault、session-secret、connections、test、远端目录 `ls`。这些路由不进 agent 上下文，也不注册模型工具。
 - 删除内部实现：`TunnelService`、`engine.cluster`、`engine.download`、`manager.cluster`、`src/ssh/tunnel/`、协议里的 cluster/tunnel/terminal/transfer-stream 类型；`commandPolicy` 守卫收窄为 `bash` 工具层 + subprocess seam。

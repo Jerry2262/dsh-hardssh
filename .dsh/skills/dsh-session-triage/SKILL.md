@@ -1,6 +1,6 @@
 ---
 name: dsh-session-triage
-description: 快速定位、解码并对比 DSH 会话日志（本地/SSH 工作区、主服务或测试服务），用于排查某次对话为什么失败、对比两个工作区的执行流、复盘模型行为或验收远程执行路由；包含会话目录编码规则、zstd 多帧解码脚本和按工具流摘要脚本，避免重复试错。
+description: 快速定位、解码并对比 DSH 会话日志（主服务或测试服务、不同工作区），用于排查某次对话为什么失败、对比执行流、复盘模型行为或验收工作区路由；包含会话目录编码规则、zstd 多帧解码脚本和按工具流摘要脚本，避免重复试错。
 ---
 
 # DSH 会话日志排障
@@ -17,8 +17,9 @@ description: 快速定位、解码并对比 DSH 会话日志（本地/SSH 工作
 - `DSH_HOME` 默认 `~/.dsh`；测试服务常用 `<repo>/.dsh-e2e/home`。
 - `<encoded-cwd>` = `--` + 会话 cwd 去掉开头 `/` 后把所有 `/` 换成 `-` + `--`。
   - `/home/jerry/tmp` → `--home-jerry-tmp--`
-  - `/home/jerry/dsh-hardssh/.dsh-e2e/home/ssh-workspaces/<id>` → `--home-jerry-dsh-hardssh-.dsh-e2e-home-ssh-workspaces-<id>--`
-- SSH 工作区会话的 cwd 是**本地 anchor**（`$DSH_HOME/ssh-workspaces/<workspaceId>`），不是远端路径；按 anchor 编码找目录。
+  - `/home/jerry/dsh-hardssh/.dsh-e2e/home/workspace-anchors/<id>` → `--home-jerry-dsh-hardssh-.dsh-e2e-home-workspace-anchors-<id>--`
+  - 旧工作区仍可能在 `ssh-workspaces/<id>` 下（旧 anchor 根），编码同理。
+- SSH 工作区会话的 cwd 是**本地 anchor**（`$DSH_HOME/workspace-anchors/<workspaceId>`；旧版 `$DSH_HOME/ssh-workspaces/<workspaceId>`），不是远端路径；按 anchor 编码找目录。
 - 同 cwd 下可能有多个会话（含已归档的）。归档只是从列表隐藏，文件还在；用 mtime 取最新。
 - 内核工作区表：`$DSH_HOME/storages/workspace.json`（workspaceId → path/title/sessionIds）；插件通用账本：`$DSH_HOME/workspaces/index.v1.json`（含 SSH workspace 的 anchor/alias/remoteRoot）。
 

@@ -215,7 +215,7 @@ function findByRemoteTarget(records: ReadonlyArray<WorkspaceRecord>, alias: stri
  * `WorkspaceCore`) into the client SSH DTO and performs workspace CRUD through
  * the generic core. Routes, agent tools, and the SSH host-delete guard stay
  * store-agnostic behind `WorkspaceStoreView`. New SSH workspaces keep the
- * established anchor layout (~/.dsh/ssh-workspaces/<id>) so existing
+ * established anchor layout (~/.dsh/workspace-anchors/<id>) so existing
  * sidebar/session bindings and the host workspace registry stay unchanged.
  */
 export class GenericWorkspaceStore implements WorkspaceStoreView {
@@ -225,7 +225,7 @@ export class GenericWorkspaceStore implements WorkspaceStoreView {
      *  rejects on any startup failure so every consumer fails closed instead
      *  of silently reading an un-migrated or corrupt ledger. */
     private readonly ready: Promise<void>,
-    /** Anchor root for newly created SSH workspaces (~/.dsh/ssh-workspaces). */
+    /** Anchor root for newly created SSH workspaces (~/.dsh/workspace-anchors). */
     private readonly anchorBase: string,
   ) {}
 
@@ -330,7 +330,7 @@ export class GenericWorkspaceStore implements WorkspaceStoreView {
   }
 
   /** The SSH anchor base this store creates its managed anchors under
-   *  (~/.dsh/ssh-workspaces). */
+   *  (~/.dsh/workspace-anchors). */
   anchorsRoot(): string {
     return this.anchorBase
   }
