@@ -271,3 +271,99 @@ interface OperationEvent {
 3. loopback-only `/console` 读取/清空路由。
 4. 工作区面板折叠区：轮询、按服务器过滤、展开原始命令、清空。
 5. 回归测试：只记录管理面操作、会话路径不产生事件、失败保留 stderr、缓冲有界。
+
+## 5. 自查：过度设计与最精简版本
+
+上面第 2～4 节是完整参考设计。按当前“自用插件 + 一个调试面板”的规模，**`OperationRunner`、`SshGateway`、`EventBus + 多 sink`、`phase: start/end` 事件流都是提前抽象**，需求并不需要事件平台。最小版本只需要四件事：管理操作记录、原始命令/错误保留、内存有界、面板查看。
+
+### 5.1 精简结构
+
+```text
+管理入口（仅这几处）                     会话路径（保持原样）
+host.test                                bash → ctx.shell
+workspace.browse                         read/write/edit
+workspace.create/delete                  glob/grep
+sandbox.deploy
+      │                                        │
+      ▼                                        ▼
+ ┌──────────────────────────┐             ┌──────────────────────────┐
+ │ OperationLog             │             │ SshEngine/SFTP           │
+ │ begin / step / finish    │             │ （不认识 OperationLog）  │
+ │ list / clear             │             └──────────────────────────┘
+ └────────────┬─────────────┘
+              │ 内存环形缓冲（200 条）
+              ▼
+ GET/DELETE /api/dsh-hardssh/ssh/console
+              │
+              ▼
+ SSH 工作区面板 → 折叠「SSH 操作日志」→ 展开查看
+```
+
+### 5.2 一个类、四个方法
+
+```ts
+type OperationName =
+  | 'host.test'
+  | 'workspace.browse'
+  | 'workspace.create'
+  | 'workspace.delete'
+  | 'sandbox.deploy'
+
+interface OperationRecord {
+  id: string
+  operation: OperationName
+  alias: string
+  startedAt: number
+  durationMs?: number
+  status: 'running' | 'ok' | 'failed'
+  error?: string              // 用户可读摘要
+  steps: Array<{
+    command: string           // 原始 SSH 命令
+    exitCode: number | null
+    durationMs: number
+    stderrTail?: string
+    stdoutTail?: string
+  }>
+}
+
+class OperationLog {
+  begin(operation: OperationName, alias: string): OperationRecord
+  step<T>(record: OperationRecord, command: string, run: () => Promise<T>): Promise<T>
+  finish(record: OperationRecord, status: 'ok' | 'failed', error?: string): void
+  list(): readonly OperationRecord[]
+  clear(): void
+}
+```
+
+没有事件总线。`list()` 直接返回环形缓冲快照；面板展开时轮询，不需要 SSE 或订阅模型。
+
+### 5.3 接入点
+
+- `RemoteSandboxProvisioner`：注入可选 `OperationLog`，在 `ensure()` 内创建 `sandbox.deploy`，每个 `exec`/`upload` 用 `step` 包一层。无论触发者是创建工作区还是会话首次执行，它都是插件操作，记录；会话里执行的 bash 命令本身不记录。
+- `routes.ts` 的 `/ws/dir`：创建 `workspace.browse`，把 `engine.exec`（解析 HOME）和 `engine.ls` 记为 steps。
+- `routes.ts` 的 `POST /ws`：创建 `workspace.create`，记录 `realpaths`/`stat`/工作区登记；`sandbox.ensure` 自己会有独立条目。
+- `ssh/routes.ts` 的 `/test`：创建 `host.test`。
+- `shell-executor.ts`、`remote-process.ts`、`remote-fs.ts` 不改，也不注入日志。
+
+失败时 `finish(..., 'failed', error)` 保留完整 `error` 链；错误响应可附 `operationId`，面板按 id 高亮。日志写入整体包在 try/catch 中，日志本身失败不能影响 SSH 操作。
+
+### 5.4 去掉的东西与代价
+
+| 去掉 | 原因 | 代价 |
+|---|---|---|
+| `OperationRunner` 独立层 | `OperationLog.begin/step/finish` 已覆盖 | 无 |
+| `SshGateway` | 管理入口只有几处，直接包 engine 调用更直白 | 新增管理操作时要手写一行 `step` |
+| `EventBus` + 多 sink | 当前只有内存面板一个消费者 | 以后要文件导出再加 sink |
+| `phase` 事件流 | 记录对象原地更新即可 | 不能实时订阅中间态；面板轮询足够 |
+| `trigger` 分类 | 当前记录来源不是主要问题；sandbox 记录可带一个可选 `source` 字符串 | 以后需要按触发源过滤时再加字段 |
+| SSE/长连接 | 轮询 1 秒足够 | 非实时，但调试场景无感 |
+
+这个版本的可维护边界是：**新加一个管理操作时，显式调用 `begin/step/finish`；任何会话路径都不调用 `OperationLog`。** 这比通用框架少两层抽象，也更容易测试和审查。
+
+### 5.5 最小验收
+
+- 浏览目录失败时，面板能看到 `workspace.browse`、`engine.exec`/`engine.ls` 的原始命令和 stderr。
+- 首次远端执行触发沙箱部署失败时，面板能看到 `sandbox.deploy` 及 `mkdir` 的 exit code/stderr。
+- 会话里跑 `bash` / 写文件不会新增操作日志条目。
+- 关闭面板不轮询；清空后列表为空；日志超过 200 条时丢弃最旧并提示。
+
