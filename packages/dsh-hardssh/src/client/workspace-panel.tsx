@@ -24,6 +24,8 @@ import type {
 } from '../ssh/protocol.ts'
 import { HostFormDialog } from './ssh/panel/HostFormDialog.tsx'
 import type { SshApi } from './ssh/api.ts'
+import type { WorkspaceApi } from './api.ts'
+import { OperationLogSection } from './operation-log.tsx'
 
 /** The host-form dialog invocation state. */
 type HostDialogState = { mode: 'create' } | { mode: 'edit'; host: SshHostSummary }
@@ -33,10 +35,12 @@ export interface WorkspaceManagerPanelProps {
   manager: WorkspaceManager
   /** Full SSH host API (list/create/update/delete) for server management. */
   sshApi?: SshApi
+  /** Workspace route API; supplies the management-operation log. */
+  workspaceApi?: WorkspaceApi
 }
 
 /** The workspace manager panel body. */
-export function WorkspaceManagerPanel({ manager, sshApi }: WorkspaceManagerPanelProps): ReactElement {
+export function WorkspaceManagerPanel({ manager, sshApi, workspaceApi }: WorkspaceManagerPanelProps): ReactElement {
   const [workspaces, setWorkspaces] = useState<SshWorkspaceRecord[]>(() => manager.getSnapshot().workspaces)
   const [hosts, setHosts] = useState<SshHostSummary[] | null>(null)
   const [connectedAliases, setConnectedAliases] = useState<ReadonlySet<string> | null>(null)
@@ -256,6 +260,9 @@ export function WorkspaceManagerPanel({ manager, sshApi }: WorkspaceManagerPanel
           </button>
         </div>
       )}
+
+      {/* Debug surface: plugin management operations only (never session tools). */}
+      <OperationLogSection api={workspaceApi} />
 
       {hostDialog !== null && sshApi !== undefined && (
         <HostFormDialog

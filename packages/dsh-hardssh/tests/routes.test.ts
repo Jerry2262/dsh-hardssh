@@ -22,6 +22,7 @@ import { bootstrapGenericWorkspaceCore } from '../src/index.ts'
 import { makeRoutes as makeWorkspaceRoutes } from '../src/routes.ts'
 import { makeRoutes as makeSshRoutes } from '../src/ssh/routes.ts'
 import { WORKSPACE_API } from '../src/protocol.ts'
+import { OperationLog } from '../src/ssh/operation-log.ts'
 import { SSH_API } from '../src/ssh/protocol.ts'
 import { FakeEngine, asSshEngine } from './providers/fake-ssh-engine.ts'
 
@@ -363,6 +364,7 @@ async function startWorkspaceServer(options: {
   workspaces: GenericWorkspaceStore
   registerHostWorkspace?: (anchorPath: string, title: string) => Promise<void>
   unregisterHostWorkspace?: (anchorPath: string) => Promise<void>
+  operationLog?: OperationLog
 }): Promise<{ server: Server; port: number; engine: { exec: ReturnType<typeof vi.fn>; ls: ReturnType<typeof vi.fn>; mkdir: ReturnType<typeof vi.fn>; realpaths: ReturnType<typeof vi.fn> } }> {
   const engine = {
     exec: vi.fn(),
@@ -377,6 +379,7 @@ async function startWorkspaceServer(options: {
     workspaces: options.workspaces,
     registerHostWorkspace: options.registerHostWorkspace,
     unregisterHostWorkspace: options.unregisterHostWorkspace,
+    operationLog: options.operationLog,
   })
   const server = createServer((req, res) => {
     const rawPath = new URL(req.url ?? '/', 'http://x').pathname
@@ -631,5 +634,72 @@ describe('remote sandbox precondition at workspace creation', () => {
     const created = await send('POST', WORKSPACE_API.sshWorkspaces, { title: 'provisioned', alias: 'host', remoteRoot: '/srv/provisioned' })
     expect(created.status).toBe(200)
     expect(sandboxEnsure).toHaveBeenCalledWith('host')
+  })
+})
+
+describe('management-operation log (console route)', () => {
+  it('records a workspace create with its management steps, and clears on DELETE', async () => {
+    const workspaces = await freshGenericStore()
+    const operationLog = new OperationLog()
+    const running = await startWorkspaceServer({ workspaces, operationLog })
+    try {
+      const created = await sendTo(running.port, 'POST', WORKSPACE_API.sshWorkspaces, { title: 'logged', alias: 'host', remoteRoot: '/srv/logged' })
+      expect(created.status).toBe(200)
+
+      const consoleResponse = await sendTo(running.port, 'GET', WORKSPACE_API.console)
+      expect(consoleResponse.status).toBe(200)
+      const snapshot = JSON.parse(consoleResponse.text) as {
+        entries: Array<{ operation: string; alias: string; status: string; steps: Array<{ command: string }> }>
+        dropped: number
+      }
+      expect(snapshot.dropped).toBe(0)
+      expect(snapshot.entries).toHaveLength(1)
+      expect(snapshot.entries[0]!.operation).toBe('workspace.create')
+      expect(snapshot.entries[0]!.alias).toBe('host')
+      expect(snapshot.entries[0]!.status).toBe('ok')
+      expect(snapshot.entries[0]!.steps.map(step => step.command)).toEqual(expect.arrayContaining([
+        expect.stringContaining('/srv/logged'),
+        expect.stringContaining('workspace record create'),
+      ]))
+
+      const cleared = await sendTo(running.port, 'DELETE', WORKSPACE_API.console)
+      expect(cleared.status).toBe(200)
+      const afterClear = await sendTo(running.port, 'GET', WORKSPACE_API.console)
+      expect(JSON.parse(afterClear.text)).toEqual({ entries: [], dropped: 0 })
+    } finally {
+      await new Promise<void>((resolve) => { running.server.close(() => resolve()) })
+    }
+  })
+
+  it('records a failed directory browse with the failing command', async () => {
+    const workspaces = await freshGenericStore()
+    const operationLog = new OperationLog()
+    const running = await startWorkspaceServer({ workspaces, operationLog })
+    running.engine.exec.mockResolvedValue({ success: false, exitCode: 1, stdout: '', stderr: 'permission denied' })
+    try {
+      const browse = await sendTo(running.port, 'GET', `${WORKSPACE_API.sshWorkspaceDir}?alias=host`)
+      expect(browse.status).toBe(502)
+
+      const entry = operationLog.snapshot().entries[0]!
+      expect(entry.operation).toBe('workspace.browse')
+      expect(entry.status).toBe('failed')
+      expect(entry.error).toContain('could not resolve remote home')
+      expect(entry.steps[0]!.command).toContain('$HOME')
+      expect(entry.steps[0]!.exitCode).toBe(1)
+    } finally {
+      await new Promise<void>((resolve) => { running.server.close(() => resolve()) })
+    }
+  })
+
+  it('serves an empty snapshot when no log is wired', async () => {
+    const workspaces = await freshGenericStore()
+    const running = await startWorkspaceServer({ workspaces })
+    try {
+      const response = await sendTo(running.port, 'GET', WORKSPACE_API.console)
+      expect(response.status).toBe(200)
+      expect(JSON.parse(response.text)).toEqual({ entries: [], dropped: 0 })
+    } finally {
+      await new Promise<void>((resolve) => { running.server.close(() => resolve()) })
+    }
   })
 })

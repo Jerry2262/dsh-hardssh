@@ -37,6 +37,7 @@ import { GenericWorkspaceStore, type WorkspaceStoreView } from './backend.ts'
 import { makeRoutes, reconcileHostWorkspaces, type HostWorkspaceReconcileDeps, type HostWorkspaceReconcileReport } from './routes.ts'
 import { RemoteSandboxProvisioner } from './sandbox/remote-sandbox.ts'
 import { SshEngine } from './ssh/engine.ts'
+import { OperationLog } from './ssh/operation-log.ts'
 import { mountSshCapability } from './ssh/plugin.ts'
 import { HostStore } from './ssh/store.ts'
 import { SecureHostStore } from './ssh/store.ts'
@@ -284,7 +285,10 @@ export function apply(ctx: Context, config?: Config): void {
   // Remote-world execution precondition: the vendored Landlock launcher is
   // provisioned into the bound host's home on first use and verified by probe.
   // Creation and execution both fail closed when it cannot be provided.
-  const remoteSandbox = new RemoteSandboxProvisioner(engine)
+  // One process-wide log feeds the sidebar console; only management operations
+  // write to it (session tools never call it).
+  const operationLog = new OperationLog({ redact: text => engine.redact(text) })
+  const remoteSandbox = new RemoteSandboxProvisioner(engine, { log: operationLog })
   ctx.provide('hardsshSandbox', remoteSandbox)
 
   // Canonical provider-neutral workspace runtime. It is the only in-process
@@ -331,7 +335,7 @@ export function apply(ctx: Context, config?: Config): void {
   // connectable even when the workspace panel itself is switched off. The
   // host-delete reference guard reads the same record source as the
   // workspace surfaces.
-  mountSshCapability(ctx, { store: secureHosts, engine, knownHosts, vault, ledger: workspaces, health })
+  mountSshCapability(ctx, { store: secureHosts, engine, knownHosts, vault, ledger: workspaces, health, operationLog })
 
   // Per-host command guard (tool layer). Default is NO interception: only hosts
   // that explicitly carry a `commandPolicy` are gated. The only tool-layer
@@ -395,6 +399,7 @@ export function apply(ctx: Context, config?: Config): void {
     sandbox: remoteSandbox,
     registerHostWorkspace,
     unregisterHostWorkspace,
+    operationLog,
   })
   // webServer is optional (headless profiles lack it): dynamic inject keeps
   // this plugin loadable everywhere, mounting routes only when it appears.

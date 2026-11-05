@@ -20,6 +20,7 @@ import { isLoopbackRequest, queryParam, readJsonBody as readJsonBodyShared, writ
 import type { WorkspaceStoreView } from './backend.ts'
 import { BackendError, backendErrorStatus, sortWorkspaceEntries } from './backend.ts'
 import { WORKSPACE_API } from './protocol.ts'
+import type { OperationLog, OperationRecord } from './ssh/operation-log.ts'
 import { RemoteSandboxError, type RemoteSandboxProvisioner } from './sandbox/remote-sandbox.ts'
 
 /** Cap on JSON request bodies (file writes carry content). */
@@ -34,6 +35,17 @@ class RequestBodyError extends Error {
     super(message)
     this.name = 'RequestBodyError'
   }
+}
+
+/** `OperationLog.step` with a no-op fallback for fixtures without a log. */
+function thisStep<T>(
+  log: OperationLog | undefined,
+  record: OperationRecord | undefined,
+  command: string,
+  run: () => Promise<T>,
+  describe?: (value: T) => { exitCode?: number | null; stdout?: string; stderr?: string },
+): Promise<T> {
+  return log === undefined ? run() : log.step(record, command, run, describe)
 }
 
 /** Read a JSON request body (throws RequestBodyError when too large/malformed). */
@@ -152,6 +164,8 @@ export interface WorkspaceRoutesDeps {
   registerHostWorkspace?: (anchorPath: string, title: string) => Promise<void>
   /** Drop the host workspace registration for an anchor dir. */
   unregisterHostWorkspace?: (anchorPath: string) => Promise<void>
+  /** In-memory log of management operations for the sidebar console. */
+  operationLog?: OperationLog
 }
 
 /**
@@ -239,14 +253,31 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
         // equivalent is one protocol-level SFTP realpath on the pooled
         // connection (the picker just listed this tree, so it is live); the
         // canonical path is what the record stores and what dedupe keys on.
+        const operation = deps.operationLog?.begin('workspace.create', alias)
+        const fail = (message: string): void => deps.operationLog?.finish(operation, 'failed', message)
         let canonicalRoot: string
         try {
-          const [canonical] = await engine.realpaths(alias, [remoteRoot])
+          const canonicalResult = await thisStep(
+            deps.operationLog,
+            operation,
+            `sftp realpath ${remoteRoot}`,
+            () => engine.realpaths(alias, [remoteRoot]),
+            value => ({ exitCode: 0, stdout: value[0] ?? remoteRoot }),
+          )
+          const canonical = canonicalResult[0]
           canonicalRoot = canonical ?? remoteRoot
           // Native create also rejects a path that is not a directory.
-          const target = await engine.stat(alias, canonicalRoot)
+          const target = await thisStep(
+            deps.operationLog,
+            operation,
+            `sftp stat ${canonicalRoot}`,
+            () => engine.stat(alias, canonicalRoot),
+            value => ({ exitCode: 0, stdout: value.type }),
+          )
           if (target.type !== 'dir') {
-            writeJson(res, 400, { error: `remote path is not a directory: '${remoteRoot}'` })
+            const message = `remote path is not a directory: '${remoteRoot}'`
+            fail(message)
+            writeJson(res, 400, { error: message })
             return
           }
         } catch (error) {
@@ -254,9 +285,12 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
           // picker refusing a missing folder); a transport failure keeps the
           // usual 502 so the caller can retry once the host is reachable.
           if (isRemotePathMissing(error)) {
-            writeJson(res, 400, { error: `remote directory does not exist: '${remoteRoot}'` })
+            const message = `remote directory does not exist: '${remoteRoot}'`
+            fail(message)
+            writeJson(res, 400, { error: message })
             return
           }
+          fail(error instanceof Error ? error.message : String(error))
           writeRouteError(res, error, 502)
           return
         }
@@ -266,14 +300,27 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
         // execution.
         if (deps.sandbox !== undefined) {
           try {
-            await deps.sandbox.ensure(alias)
+            await thisStep(
+              deps.operationLog,
+              operation,
+              `sandbox.ensure ${alias}`,
+              () => deps.sandbox!.ensure(alias),
+              () => ({ exitCode: 0 }),
+            )
           } catch (error) {
+            fail(error instanceof Error ? error.message : String(error))
             writeRouteError(res, error, 502)
             return
           }
         }
         try {
-          const { record, created } = await workspaces.create({ title, alias, remoteRoot: canonicalRoot })
+          const { record, created } = await thisStep(
+            deps.operationLog,
+            operation,
+            `workspace record create ${title}`,
+            () => workspaces.create({ title, alias, remoteRoot: canonicalRoot }),
+            () => ({ exitCode: 0 }),
+          )
           // Make the anchor a REAL host workspace so it appears in the
           // sidebar and can host sessions (the seams route it remote by its
           // anchor path). The two stores have no shared transaction, so a
@@ -284,35 +331,40 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
           // hit) predates this request and must never be rolled back.
           if (deps.registerHostWorkspace !== undefined) {
             try {
-              await deps.registerHostWorkspace(record.anchorPath, record.title)
+              await thisStep(
+                deps.operationLog,
+                operation,
+                `host workspace register ${record.anchorPath}`,
+                () => deps.registerHostWorkspace!(record.anchorPath, record.title),
+                () => ({ exitCode: 0 }),
+              )
             } catch (error) {
               const registration = error instanceof Error ? error.message : String(error)
               if (!created) {
-                writeJson(res, 502, {
-                  error: `host workspace registration failed for reused workspace '${record.title}': ${registration}`,
-                  code: 'HOST_REGISTRATION_FAILED',
-                })
+                const message = `host workspace registration failed for reused workspace '${record.title}': ${registration}`
+                fail(message)
+                writeJson(res, 502, { error: message, code: 'HOST_REGISTRATION_FAILED' })
                 return
               }
               try {
                 await workspaces.remove(record.id)
               } catch (rollbackError) {
                 const rollback = rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-                writeJson(res, 500, {
-                  error: `host workspace registration failed for '${record.title}' (${registration}); rollback also failed (${rollback}) — workspace '${record.id}' still exists`,
-                  code: 'HOST_REGISTRATION_ROLLBACK_FAILED',
-                })
+                const message = `host workspace registration failed for '${record.title}' (${registration}); rollback also failed (${rollback}) — workspace '${record.id}' still exists`
+                fail(message)
+                writeJson(res, 500, { error: message, code: 'HOST_REGISTRATION_ROLLBACK_FAILED' })
                 return
               }
-              writeJson(res, 502, {
-                error: `host workspace registration failed for '${record.title}': ${registration}`,
-                code: 'HOST_REGISTRATION_FAILED',
-              })
+              const message = `host workspace registration failed for '${record.title}': ${registration}`
+              fail(message)
+              writeJson(res, 502, { error: message, code: 'HOST_REGISTRATION_FAILED' })
               return
             }
           }
+          deps.operationLog?.finish(operation, 'ok')
           writeJson(res, 200, { workspace: record })
         } catch (error) {
+          fail(error instanceof Error ? error.message : String(error))
           writeRouteError(res, error, 500)
         }
         return
@@ -419,25 +471,46 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
         writeJson(res, 404, { error: `alias '${alias}' not found` })
         return
       }
+      const operation = deps.operationLog?.begin('workspace.browse', alias)
+      const fail = (message: string): void => deps.operationLog?.finish(operation, 'failed', message)
       try {
         if (requestedPath === undefined || requestedPath === '') {
-          const home = await engine.exec(alias, 'printf %s "$HOME"', 10_000)
+          const home = await thisStep(
+            deps.operationLog,
+            operation,
+            'printf %s "$HOME"',
+            () => engine.exec(alias, 'printf %s "$HOME"', 10_000),
+            value => ({ exitCode: value.exitCode, stdout: value.stdout, stderr: value.stderr }),
+          )
           if (!home.success || home.stdout.trim() === '') {
-            writeJson(res, 502, { error: `could not resolve remote home: ${home.stderr.trim() || 'empty $HOME'}` })
+            const message = `could not resolve remote home: ${home.stderr.trim() || 'empty $HOME'}`
+            fail(message)
+            writeJson(res, 502, { error: message })
             return
           }
           requestedPath = home.stdout.trim()
         }
         if (requestedPath.includes('\0') || requestedPath.includes('\\') || !requestedPath.startsWith('/')) {
-          writeJson(res, 400, { error: `path must be an absolute POSIX path (got '${requestedPath}')` })
+          const message = `path must be an absolute POSIX path (got '${requestedPath}')`
+          fail(message)
+          writeJson(res, 400, { error: message })
           return
         }
         const abs = posix.normalize(requestedPath)
-        const entries = sortWorkspaceEntries(
-          (await engine.ls(alias, abs)).map((entry) => ({ name: entry.name, type: entry.type, size: entry.size, mtimeMs: entry.mtimeMs })),
+        const listed = await thisStep(
+          deps.operationLog,
+          operation,
+          `sftp readdir ${abs}`,
+          () => engine.ls(alias, abs),
+          value => ({ exitCode: 0, stdout: `${value.length} entries` }),
         )
+        const entries = sortWorkspaceEntries(
+          listed.map((entry) => ({ name: entry.name, type: entry.type, size: entry.size, mtimeMs: entry.mtimeMs })),
+        )
+        deps.operationLog?.finish(operation, 'ok')
         writeJson(res, 200, { path: abs, entries })
       } catch (error) {
+        fail(error instanceof Error ? error.message : String(error))
         writeRouteError(res, error, 502)
       }
     },
@@ -517,5 +590,30 @@ export function makeRoutes(deps: WorkspaceRoutesDeps): WebRoute[] {
     },
   }
 
-  return [hostsRoute, wsRoute, itemRoute, dirRoute, mkdirRoute, reconcileRoute]
+  /**
+   * The sidebar console: the plugin's own management operations only. Session
+   * tool calls never reach this log (they stay in the session trajectory).
+   */
+  const consoleRoute: WebRoute = {
+    kind: 'exact',
+    path: WORKSPACE_API.console,
+    handler: async (req, res) => {
+      if (!isLoopbackRequest(req)) {
+        writeJson(res, 403, { error: 'forbidden: loopback-only' })
+        return
+      }
+      if (req.method === 'GET') {
+        writeJson(res, 200, deps.operationLog?.snapshot() ?? { entries: [], dropped: 0 })
+        return
+      }
+      if (req.method === 'DELETE') {
+        deps.operationLog?.clear()
+        writeJson(res, 200, { ok: true })
+        return
+      }
+      writeJson(res, 405, { error: `method not allowed: ${req.method}` })
+    },
+  }
+
+  return [hostsRoute, wsRoute, itemRoute, dirRoute, mkdirRoute, reconcileRoute, consoleRoute]
 }

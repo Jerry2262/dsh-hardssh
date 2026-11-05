@@ -178,7 +178,7 @@ export function apply(ctx: ClientContext): void {
     // (sidebar.panellist) opening a center panel (main). The shell owns the
     // row, its label and its active highlight; selecting it switches the
     // center column, and selecting the Conversation row switches back.
-    registerWorkspacePanel(ctx, { manager, sshApi })
+    registerWorkspacePanel(ctx, { manager, sshApi, workspaceApi: api })
 
     registerDirectoryFlow(ctx, { api, sshApi })
 

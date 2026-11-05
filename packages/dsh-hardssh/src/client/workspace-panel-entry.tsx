@@ -18,6 +18,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceManager } from './state.ts'
 import type { SshApi } from './ssh/api.ts'
+import type { WorkspaceApi } from './api.ts'
 import { tt } from './text.ts'
 import { WorkspaceManagerPanel } from './workspace-panel.tsx'
 
@@ -59,6 +60,8 @@ export interface WorkspacePanelDeps {
   manager: WorkspaceManager
   /** Absent when the plugin is mounted without the SSH operations half. */
   sshApi?: SshApi
+  /** Workspace route API; the panel uses it for the management-operation log. */
+  workspaceApi?: WorkspaceApi
 }
 
 /**
@@ -67,7 +70,7 @@ export interface WorkspacePanelDeps {
  * @param deps - the workspace manager and the host API the panel uses.
  */
 export function registerWorkspacePanel(ctx: ClientContext, deps: WorkspacePanelDeps): void {
-  const inject = (): Record<string, unknown> => ({ manager: deps.manager, sshApi: deps.sshApi })
+  const inject = (): Record<string, unknown> => ({ manager: deps.manager, sshApi: deps.sshApi, workspaceApi: deps.workspaceApi })
 
   // The global row: the shell renders the button and the active highlight from
   // the list metadata, and selecting it calls layout.selectPanel(id).

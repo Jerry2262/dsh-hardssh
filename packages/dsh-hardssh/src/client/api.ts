@@ -8,6 +8,7 @@
 import { HttpApiError, buildQuery, readJson, type HttpErrorBody } from '../client-http.ts'
 import {
   WORKSPACE_API,
+  type OperationLogSnapshot,
   type RemoteDirEntry,
   type SshWorkspaceRecord,
 } from '../protocol.ts'
@@ -82,5 +83,17 @@ export class WorkspaceApi {
       body: JSON.stringify({ alias, path, name }),
     })
     return await readJson<{ path: string }>(response)
+  }
+
+  /** Read the in-memory management-operation log (newest first). */
+  async readOperationLog(): Promise<OperationLogSnapshot> {
+    const response = await fetch(WORKSPACE_API.console)
+    return await readJson<OperationLogSnapshot>(response)
+  }
+
+  /** Clear the management-operation log. */
+  async clearOperationLog(): Promise<void> {
+    const response = await fetch(WORKSPACE_API.console, { method: 'DELETE' })
+    await readJson<{ ok: true }>(response)
   }
 }

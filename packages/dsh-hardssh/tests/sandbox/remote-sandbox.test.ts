@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest'
 import { RemoteSandboxError, RemoteSandboxProvisioner } from '../../src/sandbox/remote-sandbox.ts'
 import { runnerAssetFor } from '../../src/sandbox/landlock.ts'
+import { OperationLog } from '../../src/ssh/operation-log.ts'
 
 interface ExecResult {
   success: boolean
@@ -146,5 +147,42 @@ describe('RemoteSandboxProvisioner', () => {
       code: 'REMOTE_SANDBOX_PROVISION_FAILED',
       status: 502,
     })
+  })
+
+  it('logs the deploy operation with the failing command and its stderr', async () => {
+    const fake = fakeEngine((command) => {
+      if (command.includes('uname -s')) return ok('Linux\nx86_64\n')
+      if (command.includes('$HOME')) return ok('/home/shixianjie\n')
+      if (command.includes('sha256sum')) return { ...ok(), success: false, exitCode: 1 }
+      if (command.includes('mkdir -p')) {
+        return {
+          ...ok(),
+          success: false,
+          exitCode: 1,
+          stderr: "mkdir: cannot create directory '/home/shixianjie/.dsh-hardssh': Permission denied\n",
+        }
+      }
+      return ok()
+    })
+    const log = new OperationLog()
+    const provisioner = new RemoteSandboxProvisioner(fake.engine, { log })
+    await expect(provisioner.ensure('zen5-88')).rejects.toBeInstanceOf(RemoteSandboxError)
+
+    const entries = log.snapshot().entries
+    expect(entries).toHaveLength(1)
+    const entry = entries[0]!
+    expect(entry.operation).toBe('sandbox.deploy')
+    expect(entry.alias).toBe('zen5-88')
+    expect(entry.status).toBe('failed')
+    expect(entry.error).toContain('runner directory creation failed')
+
+    const mkdir = entry.steps.find(step => step.command.includes('mkdir -p'))!
+    expect(mkdir.exitCode).toBe(1)
+    expect(mkdir.stderrTail).toContain('Permission denied')
+    // The platform/home steps that ran before the failure are kept too.
+    expect(entry.steps.map(step => step.command)).toEqual(expect.arrayContaining([
+      expect.stringContaining('uname -s'),
+      expect.stringContaining('$HOME'),
+    ]))
   })
 })

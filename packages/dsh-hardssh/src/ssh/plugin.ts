@@ -47,6 +47,8 @@ export interface SshCapabilityDeps {
   ledger?: import('../backend.ts').WorkspaceStoreView
   /** Compatibility/degradation registry served by `/api/dsh-hardssh/ssh/health`. */
   health?: import('../runtime/health.ts').HardsshHealthRegistry
+  /** In-memory log of management operations for the sidebar console. */
+  operationLog?: import('./operation-log.ts').OperationLog
 }
 
 /**
@@ -62,6 +64,7 @@ export function mountSshCapability(ctx: Context, deps: SshCapabilityDeps): void 
     vault: deps.vault,
     ledger: deps.ledger,
     health: deps.health,
+    operationLog: deps.operationLog,
     // Host PATCH/DELETE also invalidates the per-alias environment cache so
     // a re-pointed alias cannot keep serving the old host's env.
     onHostInvalidated: (alias) => invalidateRemoteEnvironment(deps.engine, alias),

@@ -76,7 +76,38 @@ export const WORKSPACE_API = {
   sshWorkspaces: WORKSPACE_API_BASE + '/ws',
   sshWorkspaceDir: WORKSPACE_API_BASE + '/ws/dir',
   sshWorkspaceMkdir: WORKSPACE_API_BASE + '/ws/mkdir',
+  console: WORKSPACE_API_BASE + '/console',
 } as const
+
+/** One page of the SSH operation log (host memory only). */
+export interface OperationLogSnapshot {
+  entries: OperationRecord[]
+  /** Entries evicted because the ring buffer was full. */
+  dropped: number
+}
+
+/** One command issued internally by one management operation. */
+export interface OperationStep {
+  command: string
+  exitCode: number | null
+  durationMs: number
+  stdoutTail?: string
+  stderrTail?: string
+}
+
+/** One plugin management operation (never a session tool invocation). */
+export interface OperationRecord {
+  id: string
+  operation: 'host.test' | 'workspace.browse' | 'workspace.create' | 'workspace.delete' | 'sandbox.deploy'
+  alias: string
+  startedAt: number
+  durationMs?: number
+  status: 'running' | 'ok' | 'failed'
+  /** User-readable failure summary; raw details are in steps/failureDetail. */
+  error?: string
+  failureDetail?: string
+  steps: OperationStep[]
+}
 
 /**
  * One SSH-bound workspace: a local anchor directory (the host-visible

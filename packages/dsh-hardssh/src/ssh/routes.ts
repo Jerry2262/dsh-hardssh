@@ -11,6 +11,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { WebRoute } from '@deepseek-ai/dsh-host-webserver'
 import type { SshEngine } from './engine.ts'
+import type { OperationLog, OperationRecord } from './operation-log.ts'
 import { SSH_API, type HostPayload, type ApiErrorBody } from './protocol.ts'
 import type { HostStore } from './store.ts'
 import { HostKeyMismatchError, HostKeyUnknownError, type KnownHostsStore } from './known-hosts.ts'
@@ -103,6 +104,8 @@ export interface SshRoutesDeps {
   onHostInvalidated?: (alias: string) => void
   /** Read-only compatibility/degradation registry (`/health` serves a copy). */
   health?: { snapshot: () => import('./protocol.ts').HardsshHealthSnapshot }
+  /** In-memory log of management operations for the sidebar console. */
+  operationLog?: OperationLog
 }
 
 /** The connection-configuration routes, owned by one call. */
@@ -453,6 +456,8 @@ export function makeRoutes(deps: SshRoutesDeps): SshRoutes {
       handler: async (req, res) => {
         if (!guard(req, res, 'POST')) return
         const request = requestAbort(req, res)
+        let operation: OperationRecord | undefined
+        const fail = (message: string): void => deps.operationLog?.finish(operation, 'failed', message)
         try {
           const body = await readJsonBody(req)
           const alias = typeof body?.alias === 'string' ? body.alias : ''
@@ -460,9 +465,20 @@ export function makeRoutes(deps: SshRoutesDeps): SshRoutes {
             writeJson(res, 400, { error: 'alias is required' })
             return
           }
-          writeJson(res, 200, { result: await engine.test(alias, request.signal) })
+          operation = deps.operationLog?.begin('host.test', alias)
+          const result = await (deps.operationLog === undefined
+            ? engine.test(alias, request.signal)
+            : deps.operationLog.step(
+                operation,
+                `ssh test ${alias}`,
+                () => engine.test(alias, request.signal),
+                value => ({ exitCode: value.ok ? 0 : 1, stderr: value.error }),
+              ))
+          deps.operationLog?.finish(operation, result.ok ? 'ok' : 'failed', result.ok ? undefined : result.error)
+          writeJson(res, 200, { result })
         } catch (error) {
           if (error instanceof NeedsPasswordError) {
+            fail(error.message)
             // The ONLY intentional 2xx difference: /test is a diagnostic the
             // GUI polls, so a missing credential is reported as a result the
             // user can act on. The body still comes from the shared mapper
@@ -470,6 +486,7 @@ export function makeRoutes(deps: SshRoutesDeps): SshRoutes {
             writeJson(res, 200, { result: { ok: false, ...safeErrorBody(error) } })
             return
           }
+          fail(error instanceof Error ? error.message : String(error))
           writeJson(res, 500, safeErrorBody(error))
         } finally {
           request.dispose()
