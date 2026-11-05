@@ -1,14 +1,20 @@
 /**
- * Collapsible "SSH operation log" section for the workspace manager panel.
+ * "SSH operation log" section for the workspace manager panel.
  *
- * It only ever displays operations the plugin itself initiated (host test,
- * remote browse, workspace create/delete, sandbox deploy). Session tools such
- * as `bash` / `read` / `write` never write to this log; their execution
- * information stays in the session trajectory.
+ * Rendered as ONE continuous, non-interactive output stream (VS Code Output
+ * style): oldest line at the top, newest at the bottom, auto-scrolled to the
+ * tail. Each line is a plain text row — the plugin's management commands and
+ * their output printed in the order they ran, not collapsible per-operation
+ * cards.
+ *
+ * Only management operations appear here (host test, remote browse, workspace
+ * create, sandbox deploy). Session tools (`bash`, `read`, `write`, `glob`,
+ * `grep`) never write to this log; their output belongs to the session
+ * trajectory.
  */
 
-import { useEffect, useState, type ReactElement } from 'react'
-import type { OperationLogSnapshot, OperationRecord, OperationStep } from '../protocol.ts'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
+import type { OperationLogSnapshot, OperationRecord } from '../protocol.ts'
 import type { WorkspaceApi } from './api.ts'
 import { tt } from './text.ts'
 import css from './workspace.module.css'
@@ -19,36 +25,54 @@ export interface OperationLogSectionProps {
   api?: WorkspaceApi
 }
 
-/** One command line inside an expanded operation. */
-function StepView({ step }: { step: OperationStep }): ReactElement {
-  return (
-    <div className={css.operationStep}>
-      <code className={css.operationCommand}>{step.command}</code>
-      <span className={css.operationMeta}>
-        {step.exitCode === null ? '—' : `exit ${step.exitCode}`} · {step.durationMs}ms
-      </span>
-      {step.stderrTail !== undefined && <pre className={css.operationOutput}>{step.stderrTail}</pre>}
-      {step.stderrTail === undefined && step.stdoutTail !== undefined && <pre className={css.operationOutput}>{step.stdoutTail}</pre>}
-    </div>
-  )
+/** One printed line of the stream. */
+interface OutputLine {
+  /** Stable key: the operation id plus the line's index inside it. */
+  key: string
+  kind: 'head' | 'command' | 'output' | 'error'
+  text: string
 }
 
-/** One operation row; expanding it reveals its steps. */
-function EntryView({ entry }: { entry: OperationRecord }): ReactElement {
-  const duration = entry.durationMs === undefined ? '…' : `${entry.durationMs}ms`
-  return (
-    <details className={css.operationEntry} data-operation-entry={entry.id}>
-      <summary className={css.operationSummary}>
-        <span className={css.operationTime}>{new Date(entry.startedAt).toLocaleTimeString()}</span>
-        <span className={css.operationAlias}>{entry.alias}</span>
-        <span className={css.operationName}>{entry.operation}</span>
-        <span className={css.operationStatus} data-state={entry.status}>{entry.status}</span>
-        <span className={css.operationDuration}>{duration}</span>
-      </summary>
-      {entry.error !== undefined && <div className={css.operationError}>{entry.error}</div>}
-      {entry.steps.map((step, index) => <StepView key={`${entry.id}-${index}`} step={step} />)}
-    </details>
-  )
+/** `HH:MM:SS` for one instant (the terminal prints local wall-clock time). */
+function stamp(epochMs: number): string {
+  const date = new Date(epochMs)
+  const pad = (value: number): string => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/** Project one operation into its printed lines (header, commands, output). */
+function linesOf(entry: OperationRecord): OutputLine[] {
+  const lines: OutputLine[] = []
+  const status = entry.status === 'running'
+    ? 'running'
+    : entry.status === 'failed'
+      ? `failed after ${entry.durationMs ?? 0}ms`
+      : `ok after ${entry.durationMs ?? 0}ms`
+  lines.push({ key: `${entry.id}:head`, kind: 'head', text: `[${stamp(entry.startedAt)}] ${entry.alias} ${entry.operation} ${status}` })
+  for (const [index, step] of entry.steps.entries()) {
+    lines.push({ key: `${entry.id}:${index}:cmd`, kind: 'command', text: `$ ${step.command}` })
+    const stream = step.stderrTail ?? step.stdoutTail
+    if (stream !== undefined) {
+      for (const [streamIndex, text] of stream.replace(/\n$/, '').split('\n').entries()) {
+        lines.push({ key: `${entry.id}:${index}:${streamIndex}:out`, kind: 'output', text })
+      }
+    }
+    const code = step.exitCode === null ? 'no exit code' : `exit ${step.exitCode}`
+    lines.push({ key: `${entry.id}:${index}:meta`, kind: 'output', text: `  (${code}, ${step.durationMs}ms)` })
+  }
+  if (entry.error !== undefined) {
+    lines.push({ key: `${entry.id}:err`, kind: 'error', text: `! ${entry.error}` })
+    if (entry.failureDetail !== undefined) {
+      lines.push({ key: `${entry.id}:cause`, kind: 'error', text: `  cause: ${entry.failureDetail}` })
+    }
+  }
+  return lines
+}
+
+/** Flatten the snapshot into one chronological stream (oldest first). */
+function streamLines(snapshot: OperationLogSnapshot): OutputLine[] {
+  const ordered = [...snapshot.entries].sort((left, right) => left.startedAt - right.startedAt)
+  return ordered.flatMap(entry => linesOf(entry))
 }
 
 /** Collapsed by default; polls only while the user has it open. */
@@ -57,6 +81,9 @@ export function OperationLogSection({ api }: OperationLogSectionProps): ReactEle
   const [snapshot, setSnapshot] = useState<OperationLogSnapshot>({ entries: [], dropped: 0 })
   const [error, setError] = useState<string | null>(null)
   const [clearing, setClearing] = useState(false)
+  const terminalRef = useRef<HTMLPreElement | null>(null)
+  /** Follow the tail unless the user scrolled up to read history. */
+  const followTailRef = useRef(true)
 
   useEffect(() => {
     if (!open || api === undefined) return undefined
@@ -78,6 +105,22 @@ export function OperationLogSection({ api }: OperationLogSectionProps): ReactEle
       clearInterval(timer)
     }
   }, [open, api])
+
+  const lines = streamLines(snapshot)
+
+  // Terminal behavior: keep the newest line visible while the user is at the
+  // bottom; leave the scroll position alone when they scrolled up.
+  useEffect(() => {
+    const terminal = terminalRef.current
+    if (terminal === null || !open || !followTailRef.current) return
+    terminal.scrollTop = terminal.scrollHeight
+  }, [open, lines.length, snapshot.entries.length])
+
+  const onScroll = (): void => {
+    const terminal = terminalRef.current
+    if (terminal === null) return
+    followTailRef.current = terminal.scrollHeight - terminal.scrollTop - terminal.clientHeight < 24
+  }
 
   const clear = async (): Promise<void> => {
     if (api === undefined || clearing) return
@@ -117,9 +160,24 @@ export function OperationLogSection({ api }: OperationLogSectionProps): ReactEle
           </button>
         </div>
         {error !== null && <div className={css.operationError}>{error}</div>}
-        {snapshot.dropped > 0 && <div className={css.operationDropped}>{tt('manager.operationLogDropped')}</div>}
-        {snapshot.entries.length === 0 && <div className={css.dialogInfo}>{tt('manager.operationLogEmpty')}</div>}
-        {snapshot.entries.map(entry => <EntryView key={entry.id} entry={entry} />)}
+        <pre
+          ref={terminalRef}
+          className={css.operationTerminal}
+          data-operation-terminal
+          onScroll={onScroll}
+          aria-live="polite"
+          aria-label={tt('manager.operationLog')}
+        >
+          {snapshot.dropped > 0 && <span className={css.operationDropped}>{tt('manager.operationLogDropped')}{'\n'}</span>}
+          {lines.length === 0
+            ? <span className={css.operationMuted}>{tt('manager.operationLogEmpty')}</span>
+            : lines.map(line => (
+                <span key={line.key} className={css.operationLine} data-kind={line.kind}>
+                  {line.text}
+                  {'\n'}
+                </span>
+              ))}
+        </pre>
       </div>
     </details>
   )

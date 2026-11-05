@@ -460,40 +460,37 @@
   color: var(--dsw-alias-text-l3, rgba(0, 0, 0, 0.55));
   font-style: italic;
 }
-.operationEntry {
-  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
+/* One continuous output stream (VS Code Output style): non-interactive,
+   chronological, auto-scrolled to the tail. */
+.operationTerminal {
+  margin: 0;
+  padding: 6px 8px;
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--dsw-alias-font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 11.5px;
+  line-height: 1.45;
+  background: var(--dsw-alias-bg-l2, rgba(0, 0, 0, 0.05));
+  border: 1px solid var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.12));
   border-radius: 4px;
-  padding: 4px 6px;
 }
-.operationSummary {
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  white-space: nowrap;
-}
-.operationTime,
-.operationDuration,
-.operationMeta {
-  color: var(--dsw-alias-text-l3, rgba(0, 0, 0, 0.55));
-  font-variant-numeric: tabular-nums;
-}
-.operationAlias {
+.operationLine[data-kind='head'] {
+  color: var(--dsw-alias-text-l1, rgba(0, 0, 0, 0.85));
   font-weight: 600;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
-.operationName {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.operationLine[data-kind='command'] {
+  color: var(--dsw-alias-text-l1, rgba(0, 0, 0, 0.85));
 }
-.operationStatus[data-state='failed'] {
+.operationLine[data-kind='output'] {
+  color: var(--dsw-alias-text-l2, rgba(0, 0, 0, 0.65));
+}
+.operationLine[data-kind='error'] {
   color: var(--dsw-alias-status-danger, #b42318);
-  font-weight: 600;
 }
-.operationStatus[data-state='running'] {
-  color: var(--dsw-alias-status-warning, #b54708);
+.operationMuted {
+  color: var(--dsw-alias-text-l3, rgba(0, 0, 0, 0.55));
 }
 .operationError {
   margin-top: 4px;
@@ -501,28 +498,5 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-.operationStep {
-  margin-top: 6px;
-  padding-top: 6px;
-  border-top: 1px dashed var(--dsw-alias-border-l2, rgba(0, 0, 0, 0.1));
-}
-.operationCommand {
-  display: block;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-.operationMeta {
-  display: block;
-  margin-top: 2px;
-}
-.operationOutput {
-  margin: 4px 0 0;
-  padding: 4px 6px;
-  max-height: 160px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  background: var(--dsw-alias-bg-l2, rgba(0, 0, 0, 0.05));
-  border-radius: 3px;
-}
+
 

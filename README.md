@@ -32,7 +32,7 @@ DSH 的文件与进程访问集中在 `ctx.fs` / `ctx.subprocess` 两个服务�
 - 远端搜索：`glob` / `grep` 直接查远端（宿主有 ripgrep 时执行同一条 rg，否则走搜索阶梯）。
 - 远端沙箱：首次连接自动上传 `landlock-run`；`read-only` / `workspace-write` preset 在远端生效。较旧内核仅部分强制并在 stderr 提示。
 - 连接闸门：主机指纹确认、会话密码输入、连接失败提示集中在最上层，避免被目录弹窗或面板遮挡。
-- SSH 操作日志：面板内折叠区，只记录插件自己的管理操作（连接测试、目录浏览、工作区创建、沙箱部署），展开可看原始命令、退出码和 stderr；会话里的命令不进入该日志。见 [docs/operation-log.md](./docs/operation-log.md)。
+- SSH 操作日志：面板内折叠区，只记录插件自己的管理操作（连接测试、目录浏览、工作区创建、沙箱部署）；展开后是一条按时间顺序持续输出的终端式信息流，打印原始命令、输出、退出码和 stderr，新内容追加在底部并自动跟随。会话里的命令不进入该日志。见 [docs/operation-log.md](./docs/operation-log.md)。
 - 可选每主机命令守卫（`commandPolicy`）：对 `bash` 与所有 `ctx.subprocess` spawn 生效，默认不拦截；它是护栏，不是沙箱。
 
 ## 安装
@@ -81,6 +81,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 - 远端为 Linux/POSIX，`bash` 可用；Landlock 启动器由插件自动上传到远端的 `$HOME/.dsh-hardssh`。
 - 内核支持 Landlock：较旧 ABI 只能部分强制，stderr 打印 `landlock-run: partial enforcement (older Landlock ABI)`。
 - 插件不要求远端安装 Node/npm；项目命令使用远端自己的开发工具。
+- 探测失败时错误信息会带上远端内核版本与已启用的 LSM 列表，便于判断是内核过旧、未编译 Landlock，还是启动时未启用。插件不提供无沙箱降级：不满足前置条件时直接拒绝创建/执行。
 
 ## 数据位置
 
@@ -99,7 +100,7 @@ pnpm test          # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-默认测试基线：695 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](./docs/decisions.md)，安全边界见 [SECURITY.md](./SECURITY.md)，插件适配手册见 [docs/adaptation.md](./docs/adaptation.md)。
+默认测试基线：698 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](./docs/decisions.md)，安全边界见 [SECURITY.md](./SECURITY.md)，插件适配手册见 [docs/adaptation.md](./docs/adaptation.md)。
 
 ## 文档
 
