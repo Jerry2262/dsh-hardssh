@@ -303,7 +303,11 @@ export class RemoteSandboxProvisioner {
 
   /** Best-effort kernel facts for a failed Landlock probe (never throws). */
   private async kernelFacts(record: OperationRecord | undefined, alias: string): Promise<string | undefined> {
-    const command = `printf 'kernel=%s\\nlsm=%s\\n' "$(uname -r)" "$(cat /sys/kernel/security/lsm 2>/dev/null)"`
+    // /proc/cmdline tells whether the boot `lsm=` parameter excludes Landlock;
+    // the kernel config tells whether Landlock was compiled in at all. Together
+    // they separate "too old kernel" / "built without Landlock" / "disabled
+    // at boot (lsm=)" without an interactive SSH session.
+    const command = `printf 'kernel=%s\nlsm=%s\ncmdline=%s\nlandlock=%s\n' "$(uname -r)" "$(cat /sys/kernel/security/lsm 2>/dev/null)" "$(cat /proc/cmdline 2>/dev/null)" "$( (zcat /proc/config.gz 2>/dev/null || cat /boot/config-$(uname -r) 2>/dev/null) | grep -m1 CONFIG_SECURITY_LANDLOCK )"`
     try {
       const result = await this.step(
         record,
@@ -314,7 +318,14 @@ export class RemoteSandboxProvisioner {
       if (!result.success || result.exitCode !== 0) return undefined
       const kernel = /kernel=(.*)/.exec(result.stdout)?.[1]?.trim() ?? 'unknown'
       const lsm = /lsm=(.*)/.exec(result.stdout)?.[1]?.trim() ?? ''
-      return `kernel ${kernel}; LSM ${lsm === '' ? '(unreadable)' : lsm}`
+      const cmdline = /cmdline=(.*)/.exec(result.stdout)?.[1]?.trim() ?? ''
+      const landlock = /landlock=(.*)/.exec(result.stdout)?.[1]?.trim() ?? ''
+      const facts = [`kernel ${kernel}`, `LSM ${lsm === '' ? '(unreadable)' : lsm}`]
+      if (cmdline !== '') facts.push(`cmdline ${cmdline.length > 300 ? `${cmdline.slice(0, 300)}…` : cmdline}`)
+      if (landlock !== '') {
+        facts.push(landlock.includes('is not set') ? 'Landlock not compiled' : `Landlock config ${landlock}`)
+      }
+      return facts.join('; ')
     } catch {
       return undefined
     }

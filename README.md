@@ -81,7 +81,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 - 远端为 Linux/POSIX，`bash` 可用；Landlock 启动器由插件自动上传到远端的 `$HOME/.dsh-hardssh`。
 - 内核支持 Landlock：较旧 ABI 只能部分强制，stderr 打印 `landlock-run: partial enforcement (older Landlock ABI)`。
 - 插件不要求远端安装 Node/npm；项目命令使用远端自己的开发工具。
-- 探测失败时错误信息会带上远端内核版本与已启用的 LSM 列表，便于判断是内核过旧、未编译 Landlock，还是启动时未启用。插件不提供无沙箱降级：不满足前置条件时直接拒绝创建/执行。
+- 探测失败时错误信息会带上远端内核版本、已启用的 LSM 列表、启动参数 `lsm=` 与 `CONFIG_SECURITY_LANDLOCK` 编译状态，便于判断是内核过旧、未编译 Landlock，还是启动参数把它排除了。插件不提供无沙箱降级：不满足前置条件时直接拒绝创建/执行。
 
 ## 数据位置
 
@@ -100,7 +100,7 @@ pnpm test          # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-默认测试基线：698 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](./docs/decisions.md)，安全边界见 [SECURITY.md](./SECURITY.md)，插件适配手册见 [docs/adaptation.md](./docs/adaptation.md)。
+默认测试基线：699 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](./docs/decisions.md)，安全边界见 [SECURITY.md](./SECURITY.md)，插件适配手册见 [docs/adaptation.md](./docs/adaptation.md)。
 
 ## 文档
 

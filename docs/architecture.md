@@ -92,7 +92,7 @@ provider 无关的通用底座，不含 SSH、不含 Cordis、不含 React：
 
 ### 1.6 远端沙箱（`src/sandbox/*`）
 
-- `remote-sandbox.ts` — 探测平台 → 解析 `$HOME` → 上传 `landlock-run` → 功能探测 + 只读拒绝冒烟测试；结果按主机缓存，失败不缓存。探测失败时补一次内核/LSM 诊断命令，把 kernel 版本与 LSM 列表写进错误与操作日志；不满足条件即拒绝，没有无沙箱降级路径。
+- `remote-sandbox.ts` — 探测平台 → 解析 `$HOME` → 上传 `landlock-run` → 功能探测 + 只读拒绝冒烟测试；结果按主机缓存，失败不缓存。探测失败时补一次诊断命令，把 kernel 版本、LSM 列表、启动参数 `lsm=` 与 `CONFIG_SECURITY_LANDLOCK` 编译状态写进错误与操作日志；不满足条件即拒绝，没有无沙箱降级路径。
 - `landlock.ts` — 内置启动器资产（按架构与哈希区分）。
 - `write-fence.ts` — 本地写入边界。
 

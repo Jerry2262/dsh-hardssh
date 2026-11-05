@@ -118,13 +118,20 @@ describe('RemoteSandboxProvisioner', () => {
     await expect(provisioner.ensure('old')).rejects.toBeInstanceOf(RemoteSandboxError)
   })
 
-  it('reports the remote kernel and LSM list when the probe fails', async () => {
+  it('reports kernel, LSM, boot cmdline and Landlock config when the probe fails', async () => {
     const fake = fakeEngine((command) => {
       if (command.includes('uname -s')) return ok('Linux\nx86_64\n')
       if (command.includes('$HOME')) return ok('/home/remote\n')
       if (command.includes('sha256sum')) return { ...ok(), success: false, exitCode: 1 }
       if (command.includes('--probe')) return { ...ok(), success: false, exitCode: 125, stderr: 'landlock-run: landlock is not enforced by this kernel\n' }
-      if (command.includes('uname -r')) return ok('kernel=5.10.0-28-amd64\nlsm=lockdown,yama,apparmor\n')
+      if (command.includes('uname -r')) {
+        return ok([
+          'kernel=6.6.0-98.0.0.103.oe2403sp2.x86_64',
+          'lsm=lockdown,capability,yama,selinux,bpf',
+          'cmdline=BOOT_IMAGE=/vmlinuz ro root=UUID=abc lsm=lockdown,capability,yama,selinux,bpf',
+          'landlock=CONFIG_SECURITY_LANDLOCK=y',
+        ].join('\n') + '\n')
+      }
       return ok()
     })
     const provisioner = new RemoteSandboxProvisioner(fake.engine)
@@ -133,11 +140,32 @@ describe('RemoteSandboxProvisioner', () => {
       (cause: unknown) => cause,
     )
     const message = error instanceof Error ? error.message : String(error)
-    expect(message).toContain('kernel 5.10.0-28-amd64')
-    expect(message).toContain('LSM lockdown,yama,apparmor')
+    expect(message).toContain('kernel 6.6.0-98.0.0.103.oe2403sp2.x86_64')
+    expect(message).toContain('LSM lockdown,capability,yama,selinux,bpf')
+    expect(message).toContain('cmdline BOOT_IMAGE=/vmlinuz')
+    expect(message).toContain('Landlock config CONFIG_SECURITY_LANDLOCK=y')
     // The diagnostic round trip uses the normal exec path (so it also lands
     // in the operation log when a log is wired).
     expect(fake.commands.some(command => command.includes('uname -r'))).toBe(true)
+  })
+
+  it('flags a kernel that was built without Landlock', async () => {
+    const fake = fakeEngine((command) => {
+      if (command.includes('uname -s')) return ok('Linux\nx86_64\n')
+      if (command.includes('$HOME')) return ok('/home/remote\n')
+      if (command.includes('sha256sum')) return { ...ok(), success: false, exitCode: 1 }
+      if (command.includes('--probe')) return { ...ok(), success: false, exitCode: 125, stderr: 'landlock-run: landlock is not enforced by this kernel\n' }
+      if (command.includes('uname -r')) {
+        return ok('kernel=4.18.0-513.el8.x86_64\nlsm=lockdown,yama,selinux\ncmdline=ro quiet\nlandlock=# CONFIG_SECURITY_LANDLOCK is not set\n')
+      }
+      return ok()
+    })
+    const provisioner = new RemoteSandboxProvisioner(fake.engine)
+    const error = await provisioner.ensure('centos8').then(
+      () => { throw new Error('expected the probe to fail') },
+      (cause: unknown) => cause,
+    )
+    expect(error instanceof Error ? error.message : '').toContain('Landlock not compiled')
   })
 
   it('refuses when the read-only smoke test lets a write through', async () => {

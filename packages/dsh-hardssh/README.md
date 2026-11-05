@@ -13,7 +13,7 @@
 - **会话绑定通过 cwd**：工作区 anchor 在 `~/.dsh/workspace-anchors/<id>`（旧版 `~/.dsh/ssh-workspaces/<id>` 继续兼容），门面按会话 cwd 判断是否路由到远端；`workspace.fs` / `workspace.process` capability 负责实际远端 I/O。会话系统提示不含 SSH/主机/连接信息。
 - **远端搜索**：`glob` / `grep` 在绑定会话里直接查远端（宿主机有 ripgrep 时执行同一条 rg；否则走搜索阶梯），不会把本机结果冒充服务器内容。
 - **会话路径一致**：远端会话的运行上下文 cwd、文件策略与 `bash` 的 `pwd` 都显示远端路径；系统提示附带一句执行环境说明，客户端 `DSH_*` 元数据不会注入远端命令。
-- **远端沙箱**：首次连接时自动上传 `landlock-run` 启动器；`read-only` / `workspace-write` preset 在远端生效（较旧内核为 partial enforcement，stderr 可见）。探测失败时错误附带远端内核版本与 LSM 列表；不满足前置条件即拒绝，没有无沙箱降级路径。
+- **远端沙箱**：首次连接时自动上传 `landlock-run` 启动器；`read-only` / `workspace-write` preset 在远端生效（较旧内核为 partial enforcement，stderr 可见）。探测失败时错误附带远端内核版本、LSM 列表、`lsm=` 启动参数与 Landlock 编译状态；不满足前置条件即拒绝，没有无沙箱降级路径。
 - **操作日志**：面板内折叠区只记录插件管理操作，展开成一条按时间正序、自动跟随底部的终端式输出（原始命令、输出、退出码、stderr）；内存缓冲、脱敏、不落盘。
 - **公开入口**：`@jerry/dsh-hardssh/base`（通用底座）、`@jerry/dsh-hardssh/workspace`（平台无关类型面）。
 
@@ -70,7 +70,7 @@ pnpm test        # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-测试基线：698 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](../../docs/decisions.md)。
+测试基线：699 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](../../docs/decisions.md)。
 
 ## License
 
