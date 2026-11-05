@@ -4,8 +4,10 @@
  *
  * This is the plugin's declared precondition, in the spirit of VS Code Remote
  * installing its server into `~/.vscode-server`: everything the plugin can
- * provision on its own is provisioned (user-writable home, no root, no sudo,
- * no package manager). Only conditions the plugin cannot fix — a non-Linux
+ * provision on its own is provisioned (a per-user writable directory, no root,
+ * no sudo, no package manager). The preferred location is `$HOME/.dsh-hardssh`;
+ * a host whose home root is not writable falls back to the user cache or a
+ * private temp directory. Only conditions the plugin cannot fix — a non-Linux
  * host, an unsupported architecture, a kernel without Landlock — fail closed
  * with an actionable error instead of degrading to unconfined execution.
  *
@@ -71,6 +73,61 @@ export interface RemoteSandboxProvisionerOptions {
 
 const DEFAULT_TIMEOUT_MS = 30_000
 const REMOTE_STATE_DIR = '.dsh-hardssh'
+/** Directory name under a cache/temp root (avoids the dotfile home spelling there). */
+const FALLBACK_STATE_DIR = 'dsh-hardssh'
+
+/** What the remote environment contributes to state-directory selection. */
+interface RemoteEnvironmentFacts {
+  home: string
+  xdgCacheHome: string
+  tmpdir: string
+  uid: string
+}
+
+/** Only absolute roots are usable as state-directory bases. */
+function absoluteRoot(value: string): string {
+  return value.startsWith('/') ? value : ''
+}
+
+/**
+ * Ordered per-user state roots. The home spelling is preferred (VS Code-style,
+ * stable across sessions and trivially private). A host like a locked-down
+ * shared machine may have a non-writable home root while `$HOME/.cache` or the
+ * temp directory is writable, so those are tried rather than failing outright.
+ */
+function stateBaseCandidates(environment: RemoteEnvironmentFacts): string[] {
+  const candidates = [posix.join(environment.home, REMOTE_STATE_DIR)]
+  const xdgCacheHome = absoluteRoot(environment.xdgCacheHome)
+  if (xdgCacheHome !== '') candidates.push(posix.join(xdgCacheHome, FALLBACK_STATE_DIR))
+  candidates.push(posix.join(environment.home, '.cache', FALLBACK_STATE_DIR))
+  if (/^\d+$/.test(environment.uid)) {
+    const tmpRoot = absoluteRoot(environment.tmpdir) || '/tmp'
+    candidates.push(posix.join(tmpRoot, `${FALLBACK_STATE_DIR}-${environment.uid}`))
+    candidates.push(posix.join('/var/tmp', `${FALLBACK_STATE_DIR}-${environment.uid}`))
+  }
+  return [...new Set(candidates)]
+}
+
+/**
+ * Create one candidate base directory and verify it is a real directory, owned
+ * by the SSH user, and inaccessible to group/other. The mode check matters for
+ * the temp fallbacks: the launcher binary must not be replaceable by another
+ * local user.
+ */
+function prepareStateBaseCommand(base: string): string {
+  return [
+    'umask 077',
+    `base=${quoteShellArg(base)}`,
+    '[ ! -L "$base" ] || exit 71',
+    'mkdir -p -- "$base" || exit 72',
+    'chmod 700 -- "$base" || exit 73',
+    "owner=$(stat -c '%u' -- \"$base\" 2>/dev/null) || exit 74",
+    "mode=$(stat -c '%a' -- \"$base\" 2>/dev/null) || exit 74",
+    '[ "$owner" = "$(id -u)" ] || exit 75',
+    '[ $((0$mode & 077)) -eq 0 ] || exit 76',
+    'exit 0',
+  ].join('; ')
+}
 
 /** Run one bounded remote command and return the result; transport failures
  *  surface as provisioning errors instead of raw stream errors. */
@@ -153,12 +210,13 @@ export class RemoteSandboxProvisioner {
         'REMOTE_SANDBOX_UNSUPPORTED_ARCH',
       )
     }
-    const home = await this.remoteHome(alias)
+    const environment = await this.remoteEnvironment(alias)
+    const stateBase = await this.prepareStateBase(alias, stateBaseCandidates(environment))
     const asset = await runnerAssetFor(arch)
-    const dir = posix.join(home, REMOTE_STATE_DIR, 'sandbox', `runner-${asset.sha256.slice(0, 12)}`)
+    const dir = posix.join(stateBase, 'sandbox', `runner-${asset.sha256.slice(0, 12)}`)
     const runnerPath = posix.join(dir, LAUNCHER_BIN)
     await this.deployIfStale(alias, asset, dir, runnerPath)
-    const enforcement = await this.probe(alias, runnerPath)
+    const enforcement = await this.probe(alias, runnerPath, stateBase)
     return { alias, arch, runnerPath, sha256: asset.sha256, enforcement }
   }
 
@@ -171,13 +229,41 @@ export class RemoteSandboxProvisioner {
     return { os: os.trim(), machine: machine.trim() }
   }
 
-  private async remoteHome(alias: string): Promise<string> {
-    const { stdout } = await execOk(this.engine, alias, "printf '%s\\n' \"$HOME\"", this.timeoutMs, 'home resolution')
-    const home = stdout.trim()
+  /** Read the facts needed to choose a state directory. */
+  private async remoteEnvironment(alias: string): Promise<RemoteEnvironmentFacts> {
+    const { stdout } = await execOk(
+      this.engine,
+      alias,
+      'printf \'%s\\n\' "$HOME" "${XDG_CACHE_HOME:-}" "${TMPDIR:-}" "$(id -u)"',
+      this.timeoutMs,
+      'environment detection',
+    )
+    const [home = '', xdgCacheHome = '', tmpdir = '', uid = ''] = stdout.trim().split('\n').map(line => line.trim())
     if (!home.startsWith('/')) {
       throw new RemoteSandboxError(`remote sandbox: '${alias}' has no absolute $HOME (got '${home}')`, 'REMOTE_SANDBOX_PROVISION_FAILED', 502)
     }
-    return home
+    return { home, xdgCacheHome, tmpdir, uid }
+  }
+
+  /**
+   * Pick the first candidate state root that can be created securely. A
+   * non-writable home is a common shared-host condition; trying the cache/temp
+   * fallbacks keeps the workspace usable instead of failing sandbox deployment.
+   */
+  private async prepareStateBase(alias: string, candidates: readonly string[]): Promise<string> {
+    const failures: string[] = []
+    for (const base of candidates) {
+      const result = await this.engine.exec(alias, prepareStateBaseCommand(base), { timeoutMs: this.timeoutMs })
+      if (result.success && result.exitCode === 0) return base
+      const detail = result.stderr.trim() || result.error || `exit code ${String(result.exitCode)}`
+      failures.push(`${base} (${detail})`)
+    }
+    throw new RemoteSandboxError(
+      `remote sandbox: no secure writable state directory on '${alias}' (tried ${failures.join('; ')}); `
+      + 'make $HOME, $XDG_CACHE_HOME, or $TMPDIR writable by the SSH user',
+      'REMOTE_SANDBOX_PROVISION_FAILED',
+      502,
+    )
   }
 
   /** Upload the launcher when the remote copy is missing or differs. */
@@ -199,7 +285,7 @@ export class RemoteSandboxProvisioner {
   }
 
   /** Functional probe + a read-only denial smoke test. */
-  private async probe(alias: string, runnerPath: string): Promise<LandlockEnforcement> {
+  private async probe(alias: string, runnerPath: string, stateBase: string): Promise<LandlockEnforcement> {
     const argv = probeArgv(runnerPath)
     const result = await this.engine.exec(alias, argv.map(quoteShellArg).join(' '), { timeoutMs: this.timeoutMs })
     const enforcement = parseProbe(result.stdout, result.exitCode)
@@ -210,9 +296,11 @@ export class RemoteSandboxProvisioner {
         'REMOTE_SANDBOX_PROBE_FAILED',
       )
     }
-    // Denial smoke test: a read-only profile must refuse a write to $HOME.
-    // A host that lets the write through is not a sandbox, whatever the probe
-    // line said, so execution stays refused.
+    // Denial smoke test: a read-only profile must refuse a write to the
+    // provisioned state directory (under $HOME, the cache, or /tmp). A host
+    // that lets the write through is not a sandbox, whatever the probe line
+    // said, so execution stays refused.
+    const probeFile = posix.join(stateBase, '.sandbox-write-probe')
     const denyCmd = [
       quoteShellArg(runnerPath),
       ...grantArgs('read-only', '/').map(quoteShellArg),
@@ -221,7 +309,7 @@ export class RemoteSandboxProvisioner {
       // `touch`, not `:` — a redirection error on the special builtin `:` is a
       // FATAL error in non-interactive POSIX shells (dash exits 2), while an
       // external command's denial is an ordinary nonzero the `if` catches.
-      quoteShellArg('f="$HOME/.dsh-hardssh/.sandbox-write-probe"; if touch "$f" 2>/dev/null; then rm -f -- "$f" 2>/dev/null; exit 9; fi; exit 0'),
+      quoteShellArg(`f=${quoteShellArg(probeFile)}; if touch "$f" 2>/dev/null; then rm -f -- "$f" 2>/dev/null; exit 9; fi; exit 0`),
     ].join(' ')
     const deny = await this.engine.exec(alias, denyCmd, { timeoutMs: this.timeoutMs })
     if (!deny.success || deny.exitCode !== 0) {

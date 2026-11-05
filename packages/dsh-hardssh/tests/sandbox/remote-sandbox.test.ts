@@ -147,4 +147,57 @@ describe('RemoteSandboxProvisioner', () => {
       status: 502,
     })
   })
+
+  it('falls back to ~/.cache when the home state directory cannot be created', async () => {
+    const asset = await runnerAssetFor('linux-x64')
+    const fake = fakeEngine((command) => {
+      if (command.includes('uname -s')) return ok('Linux\nx86_64\n')
+      if (command.includes('"$HOME"')) return ok('/home/remote\n\n\n1000\n')
+      if (command.includes('sha256sum')) return { ...ok(), success: false, exitCode: 1 }
+      if (command.includes('mkdir -p') && command.includes('/home/remote/.dsh-hardssh')) {
+        return { ...ok(), success: false, exitCode: 1, stderr: "mkdir: cannot create directory '/home/remote/.dsh-hardssh': Permission denied\n" }
+      }
+      if (command.includes('--probe')) return ok('landlock: fully enforced\n')
+      if (command.includes('--ro')) return ok()
+      return ok()
+    })
+    const provisioner = new RemoteSandboxProvisioner(fake.engine)
+    const state = await provisioner.ensure('locked-home')
+    expect(state.runnerPath).toBe(`/home/remote/.cache/dsh-hardssh/sandbox/runner-${asset.sha256.slice(0, 12)}/landlock-run`)
+    // It really tried the preferred home location first.
+    expect(fake.commands.some(command => command.includes('/home/remote/.dsh-hardssh'))).toBe(true)
+  })
+
+  it('falls back to a private temp directory when home and cache are not writable', async () => {
+    const fake = fakeEngine((command) => {
+      if (command.includes('uname -s')) return ok('Linux\nx86_64\n')
+      if (command.includes('"$HOME"')) return ok('/home/remote\n\n/tmp\n1000\n')
+      if (command.includes('sha256sum')) return { ...ok(), success: false, exitCode: 1 }
+      if (command.includes('mkdir -p') && !command.includes('/tmp/dsh-hardssh-1000')) {
+        return { ...ok(), success: false, exitCode: 1, stderr: 'Permission denied\n' }
+      }
+      if (command.includes('--probe')) return ok('landlock: fully enforced\n')
+      if (command.includes('--ro')) return ok()
+      return ok()
+    })
+    const provisioner = new RemoteSandboxProvisioner(fake.engine)
+    const state = await provisioner.ensure('shared-host')
+    expect(state.runnerPath).toContain('/tmp/dsh-hardssh-1000/sandbox/runner-')
+  })
+
+  it('fails closed with an actionable error when no state root is writable', async () => {
+    const fake = fakeEngine((command) => {
+      if (command.includes('uname -s')) return ok('Linux\nx86_64\n')
+      if (command.includes('"$HOME"')) return ok('/home/remote\n\n\n1000\n')
+      if (command.includes('sha256sum')) return { ...ok(), success: false, exitCode: 1 }
+      if (command.includes('mkdir -p')) return { ...ok(), success: false, exitCode: 1, stderr: 'Permission denied\n' }
+      return ok()
+    })
+    const provisioner = new RemoteSandboxProvisioner(fake.engine)
+    await expect(provisioner.ensure('nowhere')).rejects.toMatchObject({
+      code: 'REMOTE_SANDBOX_PROVISION_FAILED',
+      message: expect.stringContaining('no secure writable state directory'),
+    })
+    expect(fake.uploads).toHaveLength(0)
+  })
 })

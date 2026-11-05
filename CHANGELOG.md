@@ -4,6 +4,13 @@
 
 ## 未发布
 
+### 修复：远端 `$HOME` 不可写时沙箱无法部署
+
+- 现象：在受管/共享服务器上首次执行远端命令时报 `remote sandbox: runner directory creation failed ... mkdir: cannot create directory '<home>/.dsh-hardssh': Permission denied`。
+- 原因：Landlock 启动器原先固定部署在 `$HOME/.dsh-hardssh`，而这类主机的 home 根目录可能归 root 所有或只读，SSH 用户无法创建点目录。
+- 修复：按 `$HOME/.dsh-hardssh` → `$XDG_CACHE_HOME/dsh-hardssh` → `$HOME/.cache/dsh-hardssh` → `$TMPDIR/dsh-hardssh-<uid>` → `/var/tmp/dsh-hardssh-<uid>` 选择状态目录；每个候选都校验属主是 SSH 用户且权限为 0700，避免临时目录里的启动器被其他本地用户替换。只读拒绝测试改为针对实际状态目录；全部不可写时报错会列出尝试过的路径和可操作建议。
+- 新增 3 个 fallback 用例；默认套件 **681 通过 + 1 skipped**，typecheck/build 通过。
+
 ### 修复：新增服务器后的目录浏览卡在“加载中”
 
 - 现象：新增服务器并保存后进入目录浏览，界面一直显示加载；取消后才弹出主机指纹信任，信任后又被要求重新输入密码。

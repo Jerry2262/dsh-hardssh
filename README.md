@@ -66,7 +66,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 
 ## 远端沙箱前置条件
 
-- 远端为 Linux/POSIX，`bash` 可用；Landlock 启动器由插件自动上传到远端（需要可写的临时/缓存目录）。
+- 远端为 Linux/POSIX，`bash` 可用；Landlock 启动器由插件自动上传到远端，优先放在 `$HOME/.dsh-hardssh`，home 不可写时回退到用户 cache 或私有临时目录。
 - 内核支持 Landlock：较旧 ABI 只能部分强制，stderr 打印 `landlock-run: partial enforcement (older Landlock ABI)`。
 - 插件不要求远端安装 Node/npm；项目命令使用远端自己的开发工具。
 
@@ -86,7 +86,7 @@ pnpm test          # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-默认测试基线：678 通过 + 1 skipped（live SSH opt-in）。历史遗留与待决策项见 [LEGACY.md](./LEGACY.md)，安全边界见 [SECURITY.md](./SECURITY.md)，适配手册见 [SKILLS.md](./SKILLS.md)。
+默认测试基线：681 通过 + 1 skipped（live SSH opt-in）。历史遗留与待决策项见 [LEGACY.md](./LEGACY.md)，安全边界见 [SECURITY.md](./SECURITY.md)，适配手册见 [SKILLS.md](./SKILLS.md)。
 
 ## FAQ
 
