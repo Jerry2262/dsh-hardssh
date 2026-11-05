@@ -4,6 +4,13 @@
 
 ## 未发布
 
+### 修复：服务器选择界面点击主机后“卡死”
+
+- 原因：连接闸门（主机指纹 / 会话密码 / 连接失败）对话框的层级只有 40，而服务器选择弹窗是 100000/100001；闸门前置到选择弹窗之后，提示被压在选择弹窗下面，只剩一个被禁用的界面。
+- 修复：闸门对话框改为放进浏览器原生 `<dialog>` 顶层（同时能盖住内核目录弹窗），面板弹窗层也提高到 100002；闸门失败或取消后回到可正常点击的服务器选择器，并补充了对应的回归用例。
+- 新增 `packages/dsh-hardssh/docs/add-workspace-flow.md`，记录添加工作区的完整状态机与必须保持的不变量。
+- 默认套件 **682 通过 + 1 skipped**，typecheck/build 通过。
+
 ### 修复：远端 `$HOME` 不可写时沙箱无法部署
 
 - 现象：在受管/共享服务器上首次执行远端命令时报 `remote sandbox: runner directory creation failed ... mkdir: cannot create directory '<home>/.dsh-hardssh': Permission denied`。

@@ -448,7 +448,10 @@
 .modalBackdrop {
   position: fixed;
   inset: 0;
-  z-index: 40;
+  /* The connection gate can be raised on top of the workspace dialogs
+     (server picker: 100000/100001). It must never sit behind them; the native
+     <dialog> top layer in connect-host.ts covers the kernel browser too. */
+  z-index: 100002;
   display: flex;
   align-items: center;
   justify-content: center;

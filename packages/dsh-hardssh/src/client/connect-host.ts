@@ -86,10 +86,32 @@ function gateActive(alias: string, now: number): boolean {
 function mountModal(node: ReactElement): () => void {
   const host = document.createElement('div')
   host.dataset.sshGateDialog = ''
-  document.body.appendChild(host)
+  // Put the dialog in the browser's TOP LAYER, not just at a high z-index: the
+  // kernel's directory picker is a native <dialog>, and no z-index can paint
+  // above it. This gate can run while the workspace server picker (or the
+  // kernel browser) is open, and a hidden prompt looks like a frozen UI.
+  let layer: HTMLDialogElement | undefined
+  if (typeof HTMLDialogElement !== 'undefined' && typeof HTMLDialogElement.prototype.showModal === 'function') {
+    const candidate = document.createElement('dialog')
+    candidate.dataset.sshGateLayer = ''
+    candidate.style.cssText = 'position:fixed;inset:0;margin:0;padding:0;border:0;width:100%;height:100%;max-width:none;max-height:none;background:transparent;z-index:100002'
+    candidate.appendChild(host)
+    document.body.appendChild(candidate)
+    try {
+      candidate.showModal()
+      layer = candidate
+    } catch {
+      host.remove()
+      document.body.appendChild(host)
+      candidate.remove()
+    }
+  } else {
+    document.body.appendChild(host)
+  }
   const root = createRoot(host)
   const close = (): void => {
     root.unmount()
+    layer?.remove()
     host.remove()
   }
   const callerOnClose = (node.props as { onClose?: () => void }).onClose

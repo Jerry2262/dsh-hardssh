@@ -462,6 +462,23 @@ describe('DirectoryFlow SSH branch reuses the kernel browse dialog', () => {
     await act(async () => { root.unmount() })
   })
 
+  it('returns to a usable server chooser when the connection gate fails or is cancelled', async () => {
+    const gate = deferred<boolean>()
+    const ensureConnected = vi.fn(() => gate.promise)
+    const { root, openSsh } = await mountSsh({ ensureConnected })
+    await openSsh()
+    const row = document.querySelector<HTMLButtonElement>('[data-ssh-server-row="aliyun"]')!
+    await act(async () => { row.click() })
+    await act(async () => { gate.resolve(false) })
+    expect(ensureConnected).toHaveBeenCalledTimes(1)
+    expect(document.querySelector('[data-ssh-server-picker]')).not.toBeNull()
+    expect(document.querySelector('[data-kernel-browse]')).toBeNull()
+    // Not stuck busy: the row is clickable again for another attempt.
+    const again = document.querySelector<HTMLButtonElement>('[data-ssh-server-row="aliyun"]')!
+    expect(again.disabled).toBe(false)
+    await act(async () => { root.unmount() })
+  })
+
   it('seeds the add-server password into the session secret table', async () => {
     const createdHost = hostOption('newhost')
     const listHosts = vi.fn()

@@ -86,7 +86,7 @@ pnpm test          # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-默认测试基线：681 通过 + 1 skipped（live SSH opt-in）。历史遗留与待决策项见 [LEGACY.md](./LEGACY.md)，安全边界见 [SECURITY.md](./SECURITY.md)，适配手册见 [SKILLS.md](./SKILLS.md)。
+默认测试基线：682 通过 + 1 skipped（live SSH opt-in）。历史遗留与待决策项见 [LEGACY.md](./LEGACY.md)，安全边界见 [SECURITY.md](./SECURITY.md)，适配手册见 [SKILLS.md](./SKILLS.md)。
 
 ## FAQ
 
