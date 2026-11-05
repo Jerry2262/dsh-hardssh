@@ -260,8 +260,13 @@ export class RemoteSandboxProvisioner {
     const enforcement = parseProbe(result.stdout, result.exitCode)
     if (enforcement === undefined) {
       const detail = result.stderr.trim() || result.stdout.trim() || result.error || `exit code ${String(result.exitCode)}`
+      // The launcher line says only "not enforced". Ask the kernel itself so
+      // the refusal states WHY it stopped: old kernel, missing/disabled LSM
+      // entry, or a container that blocks the syscall.
+      const facts = await this.kernelFacts(record, alias)
+      const factsSuffix = facts === undefined ? '' : ` [${facts}]`
       throw new RemoteSandboxError(
-        `remote sandbox: the kernel on '${alias}' does not enforce Landlock (${detail}); DSH needs Linux 5.13+ with Landlock enabled`,
+        `remote sandbox: the kernel on '${alias}' does not enforce Landlock${factsSuffix} (${detail}); DSH needs Linux 5.13+ with Landlock enabled`,
         'REMOTE_SANDBOX_PROBE_FAILED',
       )
     }
@@ -294,6 +299,25 @@ export class RemoteSandboxProvisioner {
       )
     }
     return enforcement
+  }
+
+  /** Best-effort kernel facts for a failed Landlock probe (never throws). */
+  private async kernelFacts(record: OperationRecord | undefined, alias: string): Promise<string | undefined> {
+    const command = `printf 'kernel=%s\\nlsm=%s\\n' "$(uname -r)" "$(cat /sys/kernel/security/lsm 2>/dev/null)"`
+    try {
+      const result = await this.step(
+        record,
+        command,
+        () => this.engine.exec(alias, command, { timeoutMs: Math.min(this.timeoutMs, 5_000) }),
+        value => ({ exitCode: value.exitCode, stdout: value.stdout, stderr: value.stderr }),
+      )
+      if (!result.success || result.exitCode !== 0) return undefined
+      const kernel = /kernel=(.*)/.exec(result.stdout)?.[1]?.trim() ?? 'unknown'
+      const lsm = /lsm=(.*)/.exec(result.stdout)?.[1]?.trim() ?? ''
+      return `kernel ${kernel}; LSM ${lsm === '' ? '(unreadable)' : lsm}`
+    } catch {
+      return undefined
+    }
   }
 }
 

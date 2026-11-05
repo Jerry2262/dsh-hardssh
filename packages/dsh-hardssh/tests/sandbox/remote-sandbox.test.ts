@@ -118,6 +118,28 @@ describe('RemoteSandboxProvisioner', () => {
     await expect(provisioner.ensure('old')).rejects.toBeInstanceOf(RemoteSandboxError)
   })
 
+  it('reports the remote kernel and LSM list when the probe fails', async () => {
+    const fake = fakeEngine((command) => {
+      if (command.includes('uname -s')) return ok('Linux\nx86_64\n')
+      if (command.includes('$HOME')) return ok('/home/remote\n')
+      if (command.includes('sha256sum')) return { ...ok(), success: false, exitCode: 1 }
+      if (command.includes('--probe')) return { ...ok(), success: false, exitCode: 125, stderr: 'landlock-run: landlock is not enforced by this kernel\n' }
+      if (command.includes('uname -r')) return ok('kernel=5.10.0-28-amd64\nlsm=lockdown,yama,apparmor\n')
+      return ok()
+    })
+    const provisioner = new RemoteSandboxProvisioner(fake.engine)
+    const error = await provisioner.ensure('zen5-88').then(
+      () => { throw new Error('expected the probe to fail') },
+      (cause: unknown) => cause,
+    )
+    const message = error instanceof Error ? error.message : String(error)
+    expect(message).toContain('kernel 5.10.0-28-amd64')
+    expect(message).toContain('LSM lockdown,yama,apparmor')
+    // The diagnostic round trip uses the normal exec path (so it also lands
+    // in the operation log when a log is wired).
+    expect(fake.commands.some(command => command.includes('uname -r'))).toBe(true)
+  })
+
   it('refuses when the read-only smoke test lets a write through', async () => {
     const fake = fakeEngine((command) => {
       if (command.includes('uname -s')) return ok('Linux\nx86_64\n')
