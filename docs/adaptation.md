@@ -1,14 +1,14 @@
-# SKILLS — 把任意 DSH 插件适配到 SSH 工作区
+# 适配手册：把任意 DSH 插件适配到远端工作区
 
-> 写给 agent 的执行手册。目标：用**最少的接口替换**，让一个插件在 SSH 工作区及其 session 下正常工作。
-> 底座包：`@tiphareth/dsh-hardssh`（本包）。参考实现：`src/client/session-connect-gate.ts`、`src/client/ssh/session-target.ts`、`src/providers/ssh/provider.ts`。
+> 写给 agent 的执行手册。目标：用**最少的接口替换**，让一个插件在远端工作区及其 session 下正常工作。
+> 底座包：`@jerry/dsh-hardssh`。参考实现：`src/client/session-connect-gate.ts`、`src/providers/ssh/provider.ts`、`src/switch/switch-fs.ts`。
 
 ## 0. 先判断属于哪一类（决定要不要改）
 
 | 插件的做法 | 结论 |
 |---|---|
 | 通过 `ctx.fs` / `ctx.subprocess`（DSH 标准服务）或标准工具（read / write / edit / bash / pwsh…）访问文件与进程 | **0 改动**。seam 已被替换，路由自动生效 |
-| 依赖 **glob / grep** 做检索 | **0 改动**（0.2.5 起）。它们走 `dsh-tool-fs-search` 打包的 ripgrep，spawn 会被 subprocess seam 交给绑定的主机：宿主机有 rg 就跑同一条 argv，否则由搜索阶梯代答并投影成 rg 的输出形状 |
+| 依赖 **glob / grep** 做检索 | **0 改动**。它们走 ripgrep spawn，会被 subprocess seam 交给绑定的主机：宿主机有 rg 就跑同一条 argv，否则由搜索阶梯代答并投影成 rg 的输出形状 |
 | 直接 `import 'node:fs'` / `node:child_process`，或自建「本地/远端」状态、自建 workspace 句柄 | 需要改接口，按第 1～3 节替换 |
 
 判定命令（在插件源码根执行）：
@@ -22,14 +22,14 @@ rg -n "remote|isRemote|mode\s*[:=].*local" src
 
 ## 1. 文件 / 进程：改用底座已替换的 seam
 
-**把** 直接的 Node 文件与进程调用 **改为** DSH 标准服务：
+**把**直接的 Node 文件与进程调用**改为** DSH 标准服务：
 
 | 现在 | 改为 | 导入 |
 |---|---|---|
 | `node:fs`、`node:fs/promises` | `ctx.fs`（`FileSystem`） | `@deepseek-ai/dsh-fs` |
 | `node:child_process`、`spawn`、`exec` | `ctx.subprocess`（`SubprocessRuntime`） | `@deepseek-ai/dsh-subprocess` |
 
-改完后 **不需要**任何 SSH / 远端分支：`dsh-hardssh` 已通过 `cordis.patch.yml` 把这两个 seam 替换为路由门面，按 session 的 cwd 决定本机还是远端。
+改完后**不需要**任何 SSH / 远端分支：`dsh-hardssh` 已通过 `cordis.patch.yml` 把这两个 seam 替换为路由门面，按 session 的 cwd 决定本机还是远端。
 
 ```ts
 // before
@@ -51,13 +51,13 @@ const outcome = await handle.done
 
 ## 2. 工作区身份：改用 `workspaceCore`，不要自建映射
 
-**把** 插件自己的「路径 → 远端 / 模式」映射与自建 workspace 句柄 **改为** 通用底座的查询接口：
+**把**插件自己的「路径 → 远端 / 模式」映射与自建 workspace 句柄**改为**通用底座的查询接口：
 
 | 现在 | 改为 | 位置 |
 |---|---|---|
 | 自己维护 path→远端映射 | `ctx.workspaceCore.findByAnchor(path)` / `openByAnchor(path)` | 底座公开面 |
 | 需要「这个 cwd 属于哪个工作区」的连接 | `ctx.workspaceCore.openByAnchor(cwd)` → `WorkspaceConnection` | 同上 |
-| 自己的 workspace 句柄类型 | `WorkspaceCore` / `WorkspaceConnection` / `WorkspaceRecord` | `@tiphareth/dsh-hardssh/workspace` |
+| 自己的 workspace 句柄类型 | `WorkspaceCore` / `WorkspaceConnection` / `WorkspaceRecord` | `@jerry/dsh-hardssh/workspace` |
 | 自己实现的文件/进程能力契约 | `connection.get('workspace.fs' \| 'workspace.process' \| 'workspace.search')` | 同上 |
 
 ```ts
@@ -84,7 +84,7 @@ if (record !== undefined) {
 
 ## 3. 注册新 provider（只有要接新后端时才做）
 
-**把** 自建的后端注册 **改为** 底座的 provider 契约：
+**把**自建的后端注册**改为**底座的 provider 契约：
 
 ```ts
 const provider: WorkspaceProvider = {
@@ -105,7 +105,7 @@ const dispose = ctx.workspaceCore.registerProvider(provider)
 
 ## 4. 客户端（浏览器侧）：按 session 取远端身份
 
-**把** 自建的「当前是否远端 / 当前连哪台」状态 **改为** 从公开的 session 列表 + 工作区快照推导：
+**把**自建的「当前是否远端 / 当前连哪台」状态**改为**从公开的 session 列表 + 工作区快照推导：
 
 | 现在 | 改为 |
 |---|---|
@@ -138,3 +138,4 @@ const dispose = ctx.workspaceCore.registerProvider(provider)
 - 不要缓存 `WorkspaceRecord` 当作长期身份 —— 用 `id` + `findByAnchor()` 重新解析。
 - 不要用本机 `realpath` 解析远端路径 —— 交给 `workspace.fs` capability。
 - 不要假设锚点目录存在或可写 —— 它只是 session cwd 的占位锚点。
+- 不要在共享的 `SshEngine` 上挂全局日志钩子 —— 需要操作日志时在管理入口显式记录。

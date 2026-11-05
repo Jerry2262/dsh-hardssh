@@ -3,7 +3,7 @@
  * uses this to mount local + ssh providers; third-party providers register
  * the same way through the base plugin API.
  *
- * @module @tiphareth/dsh-hardssh/providers
+ * @module @jerry/dsh-hardssh/providers
  */
 
 import type { WorkspaceProvider } from '../base/model.ts'

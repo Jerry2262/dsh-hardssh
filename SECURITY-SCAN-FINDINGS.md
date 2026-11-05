@@ -8,7 +8,7 @@ Line numbers are as of `b7358aa` (plugin `0.2.6-alpha`).
 
 ## 0. How the scan reads this plugin
 
-`@tiphareth/dsh-hardssh` runs commands and reads/writes files **on the remote hosts the user
+`@jerry/dsh-hardssh` runs commands and reads/writes files **on the remote hosts the user
 configured**; that is its purpose. dsh.so's own risk model maps "shell / subprocess" and
 "dynamic code execution" hits to **needs review (medium)**, not critical — only hardcoded
 secrets, exfiltration endpoints, destructive patterns and mining are blocking. This
@@ -132,5 +132,5 @@ CSRF protection.
 
 ## F. Questions from a reviewer
 
-Open an issue on <https://github.com/tiphareth0/dsh-hardssh/issues> — please include the
+Open an issue on <https://github.com/Jerry2262/dsh-hardssh/issues> — please include the
 finding, the file, and what you would need to see to call it resolved.

@@ -1,24 +1,27 @@
-# dsh-hardssh — 把远端目录当作 DSH 工作区
+# @jerry/dsh-hardssh
+
+把远端主机目录当作 DSH 原生工作区的插件包。仓库根目录的 [README](../../README.md) 是项目总览；本文是包级说明。
 
 已适配 DSH **0.1.5 ~ 0.2.1，含官方桌面版（Electron）**。在 DSH Web GUI 里把一台 SSH 主机上的目录添加为原生工作区；在该工作区的会话中，`read` / `write` / `edit` / `bash` / `glob` / `grep` 全部透明地作用于远端目录，用法与本地工作区一致。远端 `bash` 由自动部署的 Landlock 启动器按会话权限 preset 约束。
 
-本插件只做这一件事：**一个会话 = 一个远端工作区 = 一台主机**。它不注册任何 `ssh_*` / `remote_*` 模型工具，也不提供多主机运维控制台。主机配置只在「创建工作区」时作为连接信息使用。
+本包只做这一件事：**一个会话 = 一个远端工作区 = 一台主机**。它不注册任何 `ssh_*` / `remote_*` 模型工具，也不提供多主机运维控制台。
 
 ## 核心优势
 
-- **对插件和工具零改动**：`cordis.patch.yml` 禁用部署自带的 `fs-sandbox` / `subprocess` 行，由本包的 `hardssh-fs` / `hardssh-subprocess` / `hardssh-shell` 提供路由门面。任何走标准 `ctx.fs` / `ctx.subprocess` 的插件与标准工具，在 SSH 工作区会话里自动运行在远端；本地会话不受影响。
+- **对插件和工具零改动**：`cordis.patch.yml` 禁用部署自带的 `fs-sandbox` / `subprocess` / `bash-sandbox` 行，由本包的 `hardssh-fs` / `hardssh-subprocess` / `hardssh-shell` 提供路由门面。任何走标准 `ctx.fs` / `ctx.subprocess` 的插件与标准工具，在远端工作区会话里自动运行在远端；本地会话不受影响。
 - **单一共享实例**：`HostStore` + `SshEngine`（ssh2 连接池）在 `src/index.ts` 创建一次；主机配置变更会失效相关连接。
-- **会话绑定通过 cwd**：SSH 工作区的 anchor 在 `~/.dsh/workspace-anchors/<id>`（旧版 `~/.dsh/ssh-workspaces/<id>` 继续兼容），`SwitchFileSystem` / 路由门面按会话 cwd 判断是否路由到远端；`workspace.fs` / `workspace.process` capability 负责实际远端 I/O。会话系统提示不含 SSH/主机/连接信息。
+- **会话绑定通过 cwd**：工作区 anchor 在 `~/.dsh/workspace-anchors/<id>`（旧版 `~/.dsh/ssh-workspaces/<id>` 继续兼容），门面按会话 cwd 判断是否路由到远端；`workspace.fs` / `workspace.process` capability 负责实际远端 I/O。会话系统提示不含 SSH/主机/连接信息。
 - **远端搜索**：`glob` / `grep` 在绑定会话里直接查远端（宿主机有 ripgrep 时执行同一条 rg；否则走搜索阶梯），不会把本机结果冒充服务器内容。
 - **会话路径一致**：远端会话的运行上下文 cwd、文件策略与 `bash` 的 `pwd` 都显示远端路径；系统提示附带一句执行环境说明，客户端 `DSH_*` 元数据不会注入远端命令。
 - **远端沙箱**：首次连接时自动上传 `landlock-run` 启动器；`read-only` / `workspace-write` preset 在远端生效（较旧内核为 partial enforcement，stderr 可见）。
-- **公开入口**：`@tiphareth/dsh-hardssh/base`（通用底座）、`@tiphareth/dsh-hardssh/workspace`（平台无关类型面）。
+- **操作日志**：面板内折叠区只记录插件管理操作，含原始命令、退出码、stderr；内存缓冲、脱敏、不落盘。
+- **公开入口**：`@jerry/dsh-hardssh/base`（通用底座）、`@jerry/dsh-hardssh/workspace`（平台无关类型面）。
 
 ## 界面入口
 
-- **左侧「SSH 工作区」面板**：唯一的管理面。添加/编辑/删除服务器连接，添加/删除远端工作区，显示连接徽章；不提供终端、隧道、集群等运维页签。
-- **目录选择器**：新建 SSH 工作区时浏览远端目录。
-- **右上角无 SSH 运维 Tab**：终端/传输/隧道/集群界面已随 ops 能力一起移除。
+- **左侧「SSH 工作区」面板**：唯一的管理面。添加/编辑/删除服务器连接，添加/删除远端工作区，显示连接徽章，底部是折叠的「SSH 操作日志」。
+- **目录选择器**：新建 SSH 工作区时浏览远端目录；连接闸门（主机指纹 / 会话密码）在打开选择器之前完成。
+- **没有 SSH 运维 Tab**：终端/传输/隧道/集群界面不在本包范围内。
 
 ## 主机命令守卫（可选，默认不拦截）
 
@@ -36,19 +39,20 @@
 ## 安装
 
 ```sh
-pnpm --filter @tiphareth/dsh-hardssh build
+pnpm --filter @jerry/dsh-hardssh build
 
 dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 ```
 
-再把 `"@tiphareth/dsh-hardssh"` 加入 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles`，重启 `dsh web`。桌面版（Electron）需要**完全退出后冷启动**，不要在应用运行中启用（原因见根目录 README）。
+再把 `"@jerry/dsh-hardssh"` 加入 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles`，重启 `dsh web`。桌面版（Electron）需要**完全退出后冷启动**，不要在应用运行中启用（原因见根目录 README）。
 
 ## 数据目录
 
-- 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600；旧 `dsh-ssh.json` 首次启动自动迁移）
+- 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600）
 - 加密凭据（`secretStorage: vault`）：`~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`
 - 工作区台账与 anchor：`~/.dsh/workspaces/index.v1.json`、`~/.dsh/workspaces/anchors`、`~/.dsh/workspace-anchors/`（旧版 `ssh-workspaces/` 继续兼容）
 - 主机密钥信任：`~/.dsh/ssh-known-hosts.json`
+- 操作日志：仅内存
 
 ## 安全模型
 
@@ -66,8 +70,8 @@ pnpm test        # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-测试基线：679 通过 + 1 skipped（live SSH opt-in）。项目历史与遗留问题见仓库根目录 [LEGACY.md](../../LEGACY.md)。
+测试基线：695 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](../../docs/decisions.md)。
 
 ## License
 
-MIT。SSH 传输层部分源自 [UynajGI/dsh-ssh](https://github.com/UynajGI/dsh-ssh)（MIT）。
+BSD-3-Clause。SSH 传输层部分端口自 [UynajGI/dsh-ssh](https://github.com/UynajGI/dsh-ssh)（MIT）；完整归属见 [ATTRIBUTION.md](../../ATTRIBUTION.md)。

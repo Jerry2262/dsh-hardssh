@@ -1,6 +1,6 @@
 # Security policy and static-scan rationale
 
-This document states what `@tiphareth/dsh-hardssh` is allowed to do, what it deliberately
+This document states what `@jerry/dsh-hardssh` is allowed to do, what it deliberately
 does **not** do, and why the capability-surface items a static scanner reports on this
 repository are expected rather than exploitable.
 
@@ -29,6 +29,7 @@ incident; everything below is the constraint set around it.
 | Local workspace operations | confined to the local workspace root; shell spawns get the same root jail | `src/providers/local/provider.ts` (`assertInsideRoot`) |
 | Client-side exceptions in a bound session | `$DSH_HOME` and `~/.agents` stay local (`localRoots`), so skills/config/state remain readable; client-native tools (`pwsh`, `cmd`, `*.exe`) spawn on the client; the vault directory is denied. A bound session is **not** fully isolated from the client machine | `src/fs.ts`, `src/switch/switch-fs.ts`, `src/switch/switch-subprocess.ts` |
 | Command policy (optional) | per-host deny/allow for command **names** and regexes, enforced at the `bash` tool layer and at the subprocess seam. Documented as a **guardrail, not a sandbox** | `src/ssh/command-policy.ts` |
+| Operation log | memory-only ring buffer (200 entries), written only by management operations (host test, directory browse, workspace create, sandbox deploy). Commands and output are redacted before storage, output keeps a 4 KB tail, and the read/clear route is loopback-only. Session commands never enter it | `src/ssh/operation-log.ts`, `src/routes.ts` |
 | Outbound network | only the SSH hosts the user configured — no telemetry, no third-party endpoint anywhere in `src/` | — |
 
 The local OS sandbox does **not** constrain remote execution: a process on the server cannot
@@ -87,3 +88,6 @@ otherwise.
 凭据默认不落盘（`vault` 模式为 AES-256-GCM + scrypt，且该目录被 fs seam 拒绝访问）；源码中
 没有任何第三方外联地址，出站连接只有用户配置的 SSH 主机；命令策略是**护栏而非沙箱**，硬约束
 应放在服务器侧。
+
+SSH 操作日志只在内存中保存插件的管理操作，入库前脱敏、输出只留尾部，且只经 loopback 路由读取；
+会话命令不进入该日志。

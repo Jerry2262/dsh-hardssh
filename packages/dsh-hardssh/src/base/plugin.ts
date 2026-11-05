@@ -13,7 +13,7 @@
  * entries) are contributed through the runtime bridge, never through this
  * core contract, so `base` stays free of Cordis/React.
  *
- * @module @tiphareth/dsh-hardssh/base/plugin
+ * @module @jerry/dsh-hardssh/base/plugin
  */
 
 import type { WorkspaceProvider, WorkspaceRecord } from './model.ts'
@@ -88,7 +88,8 @@ export interface WorkspacePlugin {
  * NOT WIRED INTO PRODUCTION YET: the DSH runtime registers the builtin
  * providers directly (`runtime/workspace-core.ts`) and no third-party plugin
  * loads through this host — only tests do. It is kept because it is the
- * documented distribution contract for out-of-tree providers (see SKILLS.md);
+ * documented distribution contract for out-of-tree providers (see
+ * docs/adaptation.md);
  * provider teardown stays ownership-correct for when it is wired up: each
  * registration releases the disposer that `register()` returned for THAT call,
  * so a duplicate (same id+version) registration never unregisters a provider it

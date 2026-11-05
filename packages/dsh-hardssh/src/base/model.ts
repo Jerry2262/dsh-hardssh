@@ -9,7 +9,7 @@
  * Everything in this module is provider-agnostic: it imports no SSH, no
  * Cordis, no React, and no `@deepseek-ai/*` runtime package.
  *
- * @module @tiphareth/dsh-hardssh/base/model
+ * @module @jerry/dsh-hardssh/base/model
  */
 
 /** Opaque workspace id (uuid or provider-assigned). */

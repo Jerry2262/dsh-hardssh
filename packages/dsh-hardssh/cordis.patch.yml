@@ -1,4 +1,4 @@
-# @tiphareth/dsh-hardssh bundle patch: inserts the plugin row into the web
+# @jerry/dsh-hardssh bundle patch: inserts the plugin row into the web
 # profile roster, and performs the SSH seam switch — disable the deployment's
 # local filesystem/subprocess/bash-sandbox providers and mount the
 # mode-routing facades (hardssh-fs / hardssh-subprocess / hardssh-shell)
@@ -12,7 +12,7 @@
 # disabled rows mounted.
 - insert:
     - id: hardssh
-      name: '@tiphareth/dsh-hardssh'
+      name: '@jerry/dsh-hardssh'
 
 - id: fs-sandbox
   disabled: true
@@ -30,12 +30,12 @@
 
 - insert:
     - id: hardssh-fs
-      name: '@tiphareth/dsh-hardssh/fs'
+      name: '@jerry/dsh-hardssh/fs'
 
     - id: hardssh-subprocess
-      name: '@tiphareth/dsh-hardssh/subprocess'
+      name: '@jerry/dsh-hardssh/subprocess'
 
     - id: hardssh-shell
-      name: '@tiphareth/dsh-hardssh/shell-executor'
+      name: '@jerry/dsh-hardssh/shell-executor'
       config:
         timeoutMs: 60000

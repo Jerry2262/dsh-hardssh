@@ -3,7 +3,7 @@
  * SubprocessRuntime capability shapes, both confined to the record root. Pure
  * base consumers without Cordis keep the lightweight path-style fallbacks.
  *
- * @module @tiphareth/dsh-hardssh/providers/local
+ * @module @jerry/dsh-hardssh/providers/local
  */
 
 import type { Context } from '@deepseek-ai/cordis'

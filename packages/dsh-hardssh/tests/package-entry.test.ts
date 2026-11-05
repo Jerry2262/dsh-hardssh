@@ -22,7 +22,7 @@ interface PackageManifest {
   publishConfig?: unknown
 }
 
-/** Parsed package.json of @tiphareth/dsh-hardssh. */
+/** Parsed package.json of @jerry/dsh-hardssh. */
 function manifest(): PackageManifest {
   return JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as PackageManifest
 }

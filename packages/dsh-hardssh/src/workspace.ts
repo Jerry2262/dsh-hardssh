@@ -7,7 +7,7 @@
  * provider classes, the ledger/router/registry internals, and version-to-version
  * conversion code — so implementation swaps never leak through this boundary.
  *
- * @module @tiphareth/dsh-hardssh/workspace
+ * @module @jerry/dsh-hardssh/workspace
  */
 
 // Platform-neutral model: records, provider/connection contracts, manifest.

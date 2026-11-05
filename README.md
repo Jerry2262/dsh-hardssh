@@ -2,26 +2,38 @@
 
 把一台 SSH 主机上的目录当作 DSH（DeepSeek Harness）的原生工作区使用。绑定后，该工作区里的 `read` / `write` / `edit` / `bash` / `glob` / `grep` 全部透明地运行在远端服务器上，本地工作区行为不变。
 
-插件只做「远端目录当本地目录用」这一件事：**一个会话绑定一个远端工作区，工作区对应一台主机**。不注册 `ssh_*` / `remote_*` 模型工具，没有多主机运维控制台、终端、隧道或集群页签；主机配置只作为工作区的连接信息存在。
+这是一个独立项目：它不注册第二套远端工具，也不提供多主机运维界面，只把「远端目录当本地目录用」这件事做完整。
+
+## 项目定位
+
+- **一个会话绑定一个远端工作区**，工作区对应一台主机。切换服务器靠切换会话，面板里没有服务器下拉框。
+- **模型只看到标准工具**。没有 `ssh_*` / `remote_*` 工具；连接配置、别名、凭据不进入会话上下文。
+- **等价物是 VS Code Remote-SSH 的编辑体验**：模型的工作目录、`pwd`、文件路径都显示同一套远端路径，操作落在远端。
+- **本地会话与原生 DSH 一致**：seam 只在绑定工作区的会话里改道，其他会话继续走部署自带的本地实现。
+
+不提供：多主机批量执行、集群、隧道、SFTP 传输页、远端终端页签、`ssh_exec` 类工具。
 
 ## 工作原理
 
-DSH 的文件与进程访问集中在 `ctx.fs` / `ctx.subprocess` 两个服务上。本插件通过 `cordis.patch.yml` 替换部署自带的三个行：
+DSH 的文件与进程访问集中在 `ctx.fs` / `ctx.subprocess` 两个服务上。插件通过 `cordis.patch.yml` 替换部署自带的三个行：
 
-- `hardssh-fs`：替换 `fs-sandbox`，按会话 cwd 在本地后端与远端 `workspace.fs` capability 之间路由；
-- `hardssh-subprocess`：替换 `subprocess`，远端模式走远端 `workspace.process` capability，客户端原生二进制（`pwsh` 等）仍在本机；
+- `hardssh-fs`：替换 `fs-sandbox`，按会话 cwd 在本地后端与远端 `workspace.fs` 能力之间路由；
+- `hardssh-subprocess`：替换 `subprocess`，远端模式走远端 `workspace.process` 能力，客户端原生二进制（`pwsh` 等）仍在本机；
 - `hardssh-shell`：替换 `bash-sandbox` 的 shell 执行器，远端命令经 SSH 执行，并由自动部署的 Landlock 启动器按会话权限 preset 约束。
 
-SSH 工作区的 anchor 目录位于 `~/.dsh/workspace-anchors/<id>`（旧版为 `~/.dsh/ssh-workspaces/<id>`，现有工作区继续兼容）；会话 cwd 落在 anchor 下时即视为远端会话。所有路径按远端根收敛，symlink 逃逸 fail closed。会话的系统提示里不含任何 SSH、主机或连接配置信息：模型只看到标准工具和本会话的 cwd。
+工作区的 anchor 目录位于 `~/.dsh/workspace-anchors/<id>`（旧版 `~/.dsh/ssh-workspaces/<id>` 仍可识别）；会话 cwd 落在 anchor 下时即视为远端会话。所有路径按远端根收敛，symlink 逃逸 fail closed。
+
+模型可见路径与实际执行位置保持一致：远端会话的运行上下文 cwd、文件策略与 `bash` 的 `pwd` 都显示远端路径；系统提示附带一句执行环境说明，客户端 `DSH_*` 元数据不会注入远端命令。详细分层见 [docs/architecture.md](./docs/architecture.md)。
 
 ## 能力
 
 - 主机认证：key / agent / password，passphrase 密钥，ProxyJump 跳板机；`~/.ssh/config` 作为只读来源参与解析。
-- 远端目录选择与工作区创建在左侧「SSH 工作区」面板完成；工作区注册为原生 DSH 工作区。
+- 远端目录选择与工作区创建在左侧「SSH 工作区」面板完成；工作区注册为原生 DSH 工作区，出现在侧边栏并可直接开会话。
 - 远端搜索：`glob` / `grep` 直接查远端（宿主有 ripgrep 时执行同一条 rg，否则走搜索阶梯）。
-- 会话可见路径一致：远端会话的运行上下文 cwd、文件策略与 `bash` 的 `pwd` 都显示远端路径；系统提示附带一句执行环境说明，客户端 `DSH_*` 元数据不会注入远端命令。
 - 远端沙箱：首次连接自动上传 `landlock-run`；`read-only` / `workspace-write` preset 在远端生效。较旧内核仅部分强制并在 stderr 提示。
-- 可选每主机命令守卫（`commandPolicy`）：对 `bash` 与所有 `ctx.subprocess` spawn 生效，默认不拦截。
+- 连接闸门：主机指纹确认、会话密码输入、连接失败提示集中在最上层，避免被目录弹窗或面板遮挡。
+- SSH 操作日志：面板内折叠区，只记录插件自己的管理操作（连接测试、目录浏览、工作区创建、沙箱部署），展开可看原始命令、退出码和 stderr；会话里的命令不进入该日志。见 [docs/operation-log.md](./docs/operation-log.md)。
+- 可选每主机命令守卫（`commandPolicy`）：对 `bash` 与所有 `ctx.subprocess` spawn 生效，默认不拦截；它是护栏，不是沙箱。
 
 ## 安装
 
@@ -34,7 +46,7 @@ pnpm build
 dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 ```
 
-再把 `"@tiphareth/dsh-hardssh"` 加入 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles`，重启 `dsh web`。改代码后重新 `pnpm build` 并重启即可，无需打包。
+再把 `"@jerry/dsh-hardssh"` 加入 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles`，重启 `dsh web`。改代码后重新 `pnpm build` 并重启即可，无需打包。
 
 ### 桌面版（Electron）dsh
 
@@ -59,23 +71,24 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 
 ```yaml
 - id: hardssh
-  name: dsh-hardssh
+  name: '@jerry/dsh-hardssh'
   config:
     secretStorage: none   # 或 vault
 ```
 
 ## 远端沙箱前置条件
 
-- 远端为 Linux/POSIX，`bash` 可用；Landlock 启动器由插件自动上传到远端（需要可写的临时/缓存目录）。
+- 远端为 Linux/POSIX，`bash` 可用；Landlock 启动器由插件自动上传到远端的 `$HOME/.dsh-hardssh`。
 - 内核支持 Landlock：较旧 ABI 只能部分强制，stderr 打印 `landlock-run: partial enforcement (older Landlock ABI)`。
 - 插件不要求远端安装 Node/npm；项目命令使用远端自己的开发工具。
 
 ## 数据位置
 
-- 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600；旧 `dsh-ssh.json` 首次启动自动迁移）
+- 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600）
 - 加密凭据：`~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`（被 fs seam 拒绝访问）
 - 工作区台账：`~/.dsh/workspaces/index.v1.json`；anchor：`~/.dsh/workspaces/anchors`、`~/.dsh/workspace-anchors/`（旧版 `~/.dsh/ssh-workspaces/` 继续兼容）
 - 主机密钥信任：`~/.dsh/ssh-known-hosts.json`
+- 操作日志：仅内存，重启清空，不落盘
 
 ## 开发
 
@@ -86,7 +99,19 @@ pnpm test          # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-默认测试基线：679 通过 + 1 skipped（live SSH opt-in）。历史遗留与待决策项见 [LEGACY.md](./LEGACY.md)，安全边界见 [SECURITY.md](./SECURITY.md)，适配手册见 [SKILLS.md](./SKILLS.md)。
+默认测试基线：695 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](./docs/decisions.md)，安全边界见 [SECURITY.md](./SECURITY.md)，插件适配手册见 [docs/adaptation.md](./docs/adaptation.md)。
+
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [docs/architecture.md](./docs/architecture.md) | 分层架构、组件职责、三条数据流（文件 / 命令 / 搜索） |
+| [docs/workspace-flow.md](./docs/workspace-flow.md) | 「添加工作区」完整状态机与不变量 |
+| [docs/operation-log.md](./docs/operation-log.md) | SSH 操作日志的边界、数据模型与接入点 |
+| [docs/decisions.md](./docs/decisions.md) | 设计决策、已知限制与待决项 |
+| [docs/adaptation.md](./docs/adaptation.md) | 把其他 DSH 插件适配到远端工作区的执行手册 |
+| [CHANGELOG.md](./CHANGELOG.md) | 变更记录 |
+| [ATTRIBUTION.md](./ATTRIBUTION.md) | 第三方代码与设计来源 |
 
 ## FAQ
 
@@ -100,6 +125,8 @@ pnpm build
 
 **能禁止 agent 在登录节点跑计算命令吗？** 可以给该主机配置 `commandPolicy`；它是护栏而非沙箱，硬限制应在服务器侧实施。
 
-## License
+**为什么面板里看不到会话里执行的命令？** 那部分属于会话轨迹，已经在对话里完整记录。操作日志只收插件自己的管理操作，两类信息不混在一起。
 
-MIT。SSH 传输层部分源自 [UynajGI/dsh-ssh](https://github.com/UynajGI/dsh-ssh)（MIT）。
+## 来源与许可
+
+本项目以 BSD-3-Clause 发布，`LICENSE` 保留上游版权声明；SSH 传输层部分端口自 [UynajGI/dsh-ssh](https://github.com/UynajGI/dsh-ssh)（MIT）。完整归属见 [ATTRIBUTION.md](./ATTRIBUTION.md)。

@@ -1,8 +1,8 @@
 {
   "name": "dsh-hardssh-workspace",
-  "version": "0.2.7",
+  "version": "0.1.0",
   "private": true,
-  "description": "Utility workspace for @tiphareth/dsh-hardssh — a generic workspace base (local/remote providers) for the dsh harness, with SSH as one provider.",
+  "description": "DSH plugin that turns a remote server directory into a native workspace (SSH-routed fs/subprocess/shell with a remote Landlock sandbox).",
   "packageManager": "pnpm@11.24.0",
   "type": "module",
   "scripts": {

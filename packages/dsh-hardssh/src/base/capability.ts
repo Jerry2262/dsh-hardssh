@@ -9,7 +9,7 @@
  * is responsible for root confinement (and any extra semantics, e.g. SFTP
  * mode bits), so a consumer can treat every workspace uniformly.
  *
- * @module @tiphareth/dsh-hardssh/base/capability
+ * @module @jerry/dsh-hardssh/base/capability
  */
 
 /** Uniform stat shape (both backends normalize to this). */

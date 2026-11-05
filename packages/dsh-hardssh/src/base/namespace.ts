@@ -12,7 +12,7 @@
  * - It contains no provider name, so the switch layer never branches on
  *   "which provider" — only on "which workspace".
  *
- * @module @tiphareth/dsh-hardssh/base/namespace
+ * @module @jerry/dsh-hardssh/base/namespace
  */
 
 /** The URI scheme used for explicit workspace-namespaced target keys. */

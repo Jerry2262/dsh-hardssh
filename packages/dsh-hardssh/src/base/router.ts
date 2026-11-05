@@ -5,7 +5,7 @@
  * facades (`switch-fs.ts` / `switch-subprocess.ts` in the runtime layer)
  * consume this router and never branch on provider identity.
  *
- * @module @tiphareth/dsh-hardssh/base/router
+ * @module @jerry/dsh-hardssh/base/router
  */
 
 import type { WorkspaceConnection } from './model.ts'

@@ -11,7 +11,7 @@
  * - `location.root` → the remote root directory
  * - `anchor.path` → the local anchor (session-visible)
  *
- * @module @tiphareth/dsh-hardssh/providers/ssh
+ * @module @jerry/dsh-hardssh/providers/ssh
  */
 
 import { posix } from 'node:path'
