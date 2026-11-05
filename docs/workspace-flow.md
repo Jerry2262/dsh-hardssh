@@ -16,26 +16,43 @@
 
 ## 状态转换
 
-```text
-closed ──open──> menu
-menu ──cancel──> closed
-menu ──local──> local_native ──done──> closed
-menu ──ssh──> server_picker
-server_picker ──cancel──> closed
-server_picker ──add host──> add_server ──cancel──> server_picker
-add_server ──save──> saving_host ──error──> add_server
-                                └──saved──> server_picker
-server_picker ──pick──> gate
-gate ──cancel / fail──> server_picker
-gate ──connected──> dir_browser
-gate ──browse──> inline_browser
-dir_browser ──pick──> creating
-dir_browser ──navigate──> dir_browser
-dir_browser ──cancel──> closed
-inline_browser ──pick──> creating
-creating ──created──> closed
-creating ──failed──> dir_browser
-creating ──needs auth──> gate ──retry──> creating
+```mermaid
+stateDiagram-v2
+    state "未打开" as closed
+    state "选择工作区类型" as menu
+    state "本地目录选择" as local_native
+    state "选择 SSH 服务器" as server_picker
+    state "添加服务器" as add_server
+    state "保存服务器" as saving_host
+    state "连接闸门" as gate
+    state "远端目录选择" as dir_browser
+    state "内联目录浏览" as inline_browser
+    state "创建工作区" as creating
+
+    [*] --> closed
+    closed --> menu: 打开
+    menu --> closed: 取消
+    menu --> local_native: 本地工作区
+    local_native --> closed: 选中或取消
+    menu --> server_picker: SSH 工作区
+    server_picker --> closed: 取消
+    server_picker --> add_server: 添加服务器
+    add_server --> server_picker: 取消表单
+    add_server --> saving_host: 保存
+    saving_host --> add_server: 保存失败
+    saving_host --> server_picker: 保存成功并登记密码
+    server_picker --> gate: 选择服务器或浏览
+    gate --> server_picker: 取消或连接失败
+    gate --> dir_browser: 连接成功
+    gate --> inline_browser: 非内核模式浏览
+    dir_browser --> dir_browser: 列目录或进入返回
+    dir_browser --> closed: 取消
+    dir_browser --> creating: 选中目录
+    inline_browser --> creating: 选中目录
+    creating --> closed: 创建成功
+    creating --> dir_browser: 创建失败
+    creating --> gate: 需要认证
+    gate --> creating: 认证通过后重试创建
 ```
 
 ## 必须保持的不变量
