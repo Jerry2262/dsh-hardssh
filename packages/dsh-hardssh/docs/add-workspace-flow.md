@@ -21,28 +21,27 @@ stateDiagram-v2
     [*] --> closed
     closed --> menu: open
     menu --> closed: cancel
-    menu --> local-native: 选择本地工作区
-    local-native --> closed: 内核选中 / 取消
-    menu --> ssh-server-picker: 选择 SSH 工作区
-    ssh-server-picker --> closed: cancel
-    ssh-server-picker --> ssh-add-server: 添加服务器
-    ssh-add-server --> ssh-server-picker: 取消表单
-    ssh-add-server --> saving-host: 保存
-    saving-host --> ssh-add-server: 校验/保存失败(error)
-    saving-host --> ssh-server-picker: 保存成功 + 刷新列表 + 登记会话密码
-    ssh-server-picker --> server-gate: 点击服务器 / 浏览
-    server-gate --> ssh-server-picker: 指纹/密码取消 或 连接失败
-    server-gate --> ssh-dir: 连接成功(点击服务器)
-    server-gate --> browsing: 连接成功(浏览按钮，非内核模式)
-    ssh-dir --> ssh-dir: 列目录/进入/返回
-    ssh-dir --> ssh-dir: 列目录失败(error toast)
-    ssh-dir --> closed: 取消
-    ssh-dir --> creating: 选中路径
-    browsing --> creating: 选中路径
-    creating --> closed: 创建成功(onPicked)
-    creating --> ssh-dir: 创建失败(error)
-    creating --> server-gate: 创建返回 NEEDS_PASSWORD / HOST_KEY_*（重试）
-    server-gate --> creating: 闸门通过后重试创建
+    menu --> local_native: local
+    local_native --> closed: done
+    menu --> server_picker: ssh
+    server_picker --> closed: cancel
+    server_picker --> add_server: add host
+    add_server --> server_picker: cancel
+    add_server --> saving_host: save
+    saving_host --> add_server: error
+    saving_host --> server_picker: saved
+    server_picker --> gate: pick
+    gate --> server_picker: cancel or fail
+    gate --> dir_browser: connected
+    gate --> inline_browser: browse
+    dir_browser --> dir_browser: navigate
+    dir_browser --> closed: cancel
+    dir_browser --> creating: pick
+    inline_browser --> creating: pick
+    creating --> closed: created
+    creating --> dir_browser: failed
+    creating --> gate: needs auth
+    gate --> creating: retry
 ```
 
 ## 必须保持的不变量
