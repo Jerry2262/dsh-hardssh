@@ -68,6 +68,10 @@ export interface DirectoryFlowInjected {
     user: string
     auth: { kind: 'password'; password: string } | { kind: 'key'; keyPath: string; passphrase?: string }
   }) => Promise<{ alias: string; host: string; port: number; user: string }>
+  /** Register an add-server password in the engine's session-only secret table.
+   *  `secretStorage='none'` keeps it out of the host store, so without this the
+   *  first directory browse would ask for the same password again. */
+  rememberSessionSecret: (alias: string, password: string) => Promise<void>
   /** Browse a remote directory (host API). */
   listRemoteDir: (alias: string, path?: string) => Promise<{ path: string; entries: Array<{ name: string; type: 'dir' | 'file' | 'other'; size: number; mtimeMs: number }> }>
   /** Create one remote child directory (host API; the picker's New folder). */
@@ -195,6 +199,8 @@ export function DirectoryFlow(props: DirectoryFlowOwnerProps & DirectoryFlowInje
   const directoryRequestSequence = useRef(0)
   const createWorkspaceRequestSequence = useRef(0)
   const createHostRequestSequence = useRef(0)
+  /** Invalidates an in-flight "select server → connect" gate. */
+  const serverGateRequestSequence = useRef(0)
 
   // The kernel browse occupant is reused for the SSH directory step. Its
   // hooks compare callback identity (a changed `listDirectory` re-runs scans),
@@ -291,6 +297,7 @@ export function DirectoryFlow(props: DirectoryFlowOwnerProps & DirectoryFlowInje
       directoryRequestSequence.current += 1
       createWorkspaceRequestSequence.current += 1
       createHostRequestSequence.current += 1
+      serverGateRequestSequence.current += 1
     }
   }, [open])
 
@@ -429,12 +436,29 @@ export function DirectoryFlow(props: DirectoryFlowOwnerProps & DirectoryFlowInje
     setChoice('ssh')
   }
 
-  /** Choose one server, then open the kernel browse dialog for its home. */
+  /** Choose one server, pass the connection gate, then open the kernel browse
+   *  dialog. Gating first keeps the trust/password prompts on top of our own
+   *  dialog; opening the kernel browser first put them behind its native modal,
+   *  which looked like a permanent "loading" state. */
   const pickServer = (alias: string): void => {
     remoteHome.current = undefined
+    const request = ++serverGateRequestSequence.current
     setHost(alias)
     setError(null)
-    setChoice('ssh-dir')
+    setLoading(true)
+    void (async () => {
+      try {
+        const connected = await props.ensureConnected(alias)
+        if (request !== serverGateRequestSequence.current || !openRef.current) return
+        if (connected) setChoice('ssh-dir')
+      } catch (e: unknown) {
+        if (request === serverGateRequestSequence.current && openRef.current) {
+          setError(e instanceof Error ? e.message : String(e))
+        }
+      } finally {
+        if (request === serverGateRequestSequence.current && openRef.current) setLoading(false)
+      }
+    })()
   }
 
   /** Create the SSH workspace at the picked remote directory; on success hand
@@ -474,6 +498,11 @@ export function DirectoryFlow(props: DirectoryFlowOwnerProps & DirectoryFlowInje
     setLoading(true)
     setError(null)
     try {
+      // Same gate as pickServer: answer trust/password while THIS dialog is the
+      // top layer. The retry loop below stays for a dropped connection.
+      const connected = await props.ensureConnected(alias)
+      if (request !== directoryRequestSequence.current || !openRef.current) return
+      if (!connected) return
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           const result = await props.listRemoteDir(alias, path)
@@ -547,6 +576,12 @@ export function DirectoryFlow(props: DirectoryFlowOwnerProps & DirectoryFlowInje
         auth: { kind: 'password', password: newHost.password },
       })
       if (request !== createHostRequestSequence.current || !openRef.current) return
+      // 'none' storage deliberately does not persist the password, but this
+      // session still needs it for the first browse: seed the in-memory table so
+      // the operator is not asked to type the same password twice.
+      if (newHost.password !== '') {
+        await props.rememberSessionSecret(created.alias, newHost.password).catch(() => undefined)
+      }
       const hostsRequest = ++hostsRequestSequence.current
       const list = await props.listHosts()
       if (
@@ -584,7 +619,7 @@ export function DirectoryFlow(props: DirectoryFlowOwnerProps & DirectoryFlowInje
       <>
         <SshServerPickerDialog
           hosts={hosts}
-          busy={busy || creating || savingHost}
+          busy={busy || creating || savingHost || loading}
           error={addingHost ? null : error}
           onPick={pickServer}
           onAddServer={() => {

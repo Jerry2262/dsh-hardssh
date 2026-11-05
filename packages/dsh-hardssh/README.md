@@ -66,7 +66,7 @@ pnpm test        # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-测试基线：676 通过 + 1 skipped（live SSH opt-in）。项目历史与遗留问题见仓库根目录 [LEGACY.md](../../LEGACY.md)。
+测试基线：678 通过 + 1 skipped（live SSH opt-in）。项目历史与遗留问题见仓库根目录 [LEGACY.md](../../LEGACY.md)。
 
 ## License
 

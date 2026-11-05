@@ -113,6 +113,7 @@ function registerDirectoryFlow(ctx: ClientContext, deps: { api: WorkspaceApi; ss
       user: string
       auth: { kind: 'password'; password: string } | { kind: 'key'; keyPath: string; passphrase?: string }
     }) => deps.sshApi.createHost(input),
+    rememberSessionSecret: (alias: string, password: string) => deps.sshApi.setSessionSecret(alias, { password }),
     listRemoteDir: (alias: string, path?: string) => deps.api.listRemoteDir(alias, path),
     createRemoteDir: (alias: string, path: string, name: string) => deps.api.createRemoteDir(alias, path, name),
     ensureConnected: (alias: string) => connectHost(deps.sshApi, alias),

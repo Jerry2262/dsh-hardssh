@@ -41,6 +41,7 @@ describe('DirectoryFlow request sequencing', () => {
       createSshWorkspace: vi.fn(),
       listHosts,
       createHost: vi.fn(),
+      rememberSessionSecret: vi.fn(async () => undefined),
       listRemoteDir,
       createRemoteDir: vi.fn(),
       ensureConnected: vi.fn(async () => true),
@@ -129,6 +130,7 @@ describe('DirectoryFlow local branch delegates to the kernel flow', () => {
       createSshWorkspace: vi.fn(),
       listHosts: vi.fn(async () => []),
       createHost: vi.fn(),
+      rememberSessionSecret: vi.fn(async () => undefined),
       listRemoteDir: vi.fn(),
       createRemoteDir: vi.fn(),
       ensureConnected: vi.fn(async () => true),
@@ -255,6 +257,7 @@ describe('DirectoryFlow menu anchoring', () => {
       createSshWorkspace: vi.fn(),
       listHosts: vi.fn(async () => []),
       createHost: vi.fn(),
+      rememberSessionSecret: vi.fn(async () => undefined),
       listRemoteDir: vi.fn(),
       createRemoteDir: vi.fn(),
       ensureConnected: vi.fn(async () => true),
@@ -382,6 +385,7 @@ describe('DirectoryFlow SSH branch reuses the kernel browse dialog', () => {
       createSshWorkspace: vi.fn(async (input) => record(input)),
       listHosts: vi.fn(async () => hostList),
       createHost: vi.fn(),
+      rememberSessionSecret: vi.fn(async () => undefined),
       listRemoteDir: vi.fn(async (_alias: string, path?: string) => ({
         path: path ?? '/home/u',
         entries: [
@@ -438,6 +442,47 @@ describe('DirectoryFlow SSH branch reuses the kernel browse dialog', () => {
     const row = document.querySelector<HTMLButtonElement>('[data-ssh-server-row="aliyun"]')!
     await act(async () => { row.click() })
     expect(document.querySelector('[data-kernel-browse]')).not.toBeNull()
+    await act(async () => { root.unmount() })
+  })
+
+  it('waits for the interactive connection gate before opening the directory dialog', async () => {
+    const gate = deferred<boolean>()
+    const ensureConnected = vi.fn(() => gate.promise)
+    const { root, openSsh } = await mountSsh({ ensureConnected })
+    await openSsh()
+    const row = document.querySelector<HTMLButtonElement>('[data-ssh-server-row="aliyun"]')!
+    await act(async () => { row.click() })
+    expect(ensureConnected).toHaveBeenCalledWith('aliyun')
+    // Still on our own server chooser: the trust/password dialogs it opens are
+    // not hidden behind the kernel browser's native modal.
+    expect(document.querySelector('[data-ssh-server-picker]')).not.toBeNull()
+    expect(document.querySelector('[data-kernel-browse]')).toBeNull()
+    await act(async () => { gate.resolve(true) })
+    expect(document.querySelector('[data-kernel-browse]')).not.toBeNull()
+    await act(async () => { root.unmount() })
+  })
+
+  it('seeds the add-server password into the session secret table', async () => {
+    const createdHost = hostOption('newhost')
+    const listHosts = vi.fn()
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([createdHost])
+    const createHost = vi.fn(async () => createdHost)
+    const rememberSessionSecret = vi.fn(async () => undefined)
+    const { root, openSsh } = await mountSsh({ listHosts, createHost, rememberSessionSecret }, [])
+    await openSsh()
+    await act(async () => { document.querySelector<HTMLButtonElement>('[data-ssh-add-server]')!.click() })
+    const fill = async (field: string, value: string): Promise<void> => {
+      const input = document.querySelector<HTMLInputElement>(`[data-ssh-host-field="${field}"]`)!
+      await act(async () => { typeInto(input, value) })
+    }
+    await fill('alias', 'newhost')
+    await fill('host', 'newhost.example')
+    await fill('user', 'root')
+    await fill('password', 'secret-pw')
+    await act(async () => { document.querySelector<HTMLButtonElement>('[data-ssh-host-save]')!.click() })
+    await act(async () => {})
+    expect(rememberSessionSecret).toHaveBeenCalledWith('newhost', 'secret-pw')
     await act(async () => { root.unmount() })
   })
 
