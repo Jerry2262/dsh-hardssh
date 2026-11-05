@@ -1,18 +1,26 @@
 /**
- * Sidebar workspace-row augmentation: labels every host workspace row whose
- * title matches an SSH-bound workspace with a compact remote badge
- * (`alias @ remoteRoot`), so a glance tells a local workspace from a remote
- * one. Pure DOM-level extension (the sidebar shell exposes no slot for row
- * decoration), following the SSH side-entry precedent: a
- * MutationObserver self-heals when React re-renders displace the injected
- * badge.
+ * Sidebar workspace-row augmentation: labels every host workspace row that
+ * binds to an SSH-bound workspace with a compact remote badge, so a glance
+ * tells a local workspace from a remote one.
  *
- * Matching follows the native model: a workspace's identity is its canonical
- * path, and its title is only a display name that different workspaces may
- * share (a local `/home/jerry/tmp` and an SSH workspace titled `tmp` coexist).
- * The plugin therefore binds each SSH record's anchor path to the native
- * workspace that owns it and decorates the row by that workspace id
- * (`data-row-key="workspace:<id>"`), never by the title.
+ * Identity comes from the native workspace id the shell puts on the row
+ * (`data-row-key="workspace:<id>"`): the badge a row gets is looked up in the
+ * binding table computed by the host half. The pass never derives a row's
+ * identity from text — in particular never from the title element the badge is
+ * appended to. Titles are display-only natively and may repeat, and reading
+ * the title back after appending the badge made the text match flip between
+ * "bound" and "unbound" on every pass: the badge was removed and re-added in a
+ * microtask loop that froze the page. Rows without a native workspace key are
+ * therefore left alone.
+ *
+ * Badge content is static for a workspace's lifetime (alias + remote root);
+ * only the connection state (connected / connecting / disconnected) changes,
+ * and only a changed connection set triggers a re-render.
+ *
+ * A React re-render can displace the injected badge, so a MutationObserver
+ * re-attaches it. Its passes are coalesced to one per animation frame and are
+ * idempotent: an unchanged row produces no DOM write, so the observer cannot
+ * feed itself.
  *
  * @module dsh-hardssh/client/workspace-badges
  */
@@ -21,6 +29,8 @@ import { anchorLabels, normalizeDisplayPath, replaceAnchorPaths } from './anchor
 
 const PROJECT_ROW_SELECTOR = '[class*="projectRow"]'
 const TITLE_SELECTOR = '[class*="title"]'
+/** Native row attribute prefix carrying the workspace id. */
+const WORKSPACE_KEY_PREFIX = 'workspace:'
 
 /** The slice of one native client workspace row the badge binding needs. */
 export interface NativeWorkspaceRowLike {
@@ -50,6 +60,33 @@ export interface SshWorkspaceLike {
 export interface WorkspaceBadgeTarget {
   alias: string
   remoteRoot: string
+}
+
+/** The mounted row-decoration pass. */
+export interface WorkspaceBadgesHandle {
+  /**
+   * Replace the records, bindings and connection state, then re-apply.
+   * @param workspaces - SSH-bound workspaces (anchor labels for tooltips).
+   * @param bindings - native workspace id → badge.
+   * @param connected - aliases with a live pooled connection.
+   * @param connecting - aliases currently probing/connecting.
+   */
+  update(
+    workspaces: ReadonlyArray<SshWorkspaceLike>,
+    bindings: ReadonlyMap<string, WorkspaceBadgeTarget>,
+    connected?: ReadonlySet<string>,
+    connecting?: ReadonlySet<string>,
+  ): void
+  /** Stop observing and strip every badge this pass injected. */
+  dispose(): void
+}
+
+/** One pass's inputs. */
+interface DecorationState {
+  bindings: ReadonlyMap<string, WorkspaceBadgeTarget>
+  labels: ReadonlyMap<string, string>
+  connected: ReadonlySet<string> | undefined
+  connecting: ReadonlySet<string> | undefined
 }
 
 /**
@@ -127,99 +164,86 @@ function ensureSpinnerStyle(): void {
   document.head.append(style)
 }
 
-/** Title → badge for titles exactly ONE SSH record carries (fallback path only). */
-function unambiguousTitleTargets(
-  workspaces: readonly SshWorkspaceLike[],
-): Map<string, WorkspaceBadgeTarget> {
-  const counts = new Map<string, number>()
-  for (const workspace of workspaces) counts.set(workspace.title, (counts.get(workspace.title) ?? 0) + 1)
-  const targets = new Map<string, WorkspaceBadgeTarget>()
-  for (const workspace of workspaces) {
-    if (counts.get(workspace.title) !== 1) continue
-    targets.set(workspace.title, { alias: workspace.alias, remoteRoot: workspace.remoteRoot })
-  }
-  return targets
-}
-
 /**
- * Mount the row-decoration pass. Queries the sidebar for project rows and
- * appends a remote badge to the rows native workspaces bind to an SSH record
- * (matched by canonical path → workspace id), never by title. Badges of
- * aliases in `connected` render blue, others gray. Self-heals via
- * MutationObserver on the sidebar container (rows re-render on
- * session/workspace changes).
+ * Mount the row-decoration pass.
+ *
+ * One observer lives for the whole mount; inputs arrive through
+ * {@link WorkspaceBadgesHandle.update} whenever the SSH record set, the native
+ * binding or the connection state really changes — not on every DOM mutation.
+ *
  * @param workspaces - the SSH workspace records (anchor/title/alias/remoteRoot).
  * @param bindings - native workspace id → badge, from {@link badgeBindings}.
  * @param connected - aliases with a live pooled connection (badge coloring).
  * @param connecting - aliases currently probing/connecting (spinner badge).
- * @returns disposer.
+ * @returns the mounted pass.
  */
 export function mountWorkspaceBadges(
   workspaces: ReadonlyArray<SshWorkspaceLike>,
   bindings: ReadonlyMap<string, WorkspaceBadgeTarget>,
   connected?: ReadonlySet<string>,
   connecting?: ReadonlySet<string>,
-): () => void {
-  // Older shells expose no `data-row-key`; their fallback may only use a title
-  // that exactly one SSH record carries (ambiguous titles stay undecorated).
-  const byUniqueTitle = unambiguousTitleTargets(workspaces)
-  /** Resolve the SSH record a project row stands for: native id first, then title. */
-  const targetForRow = (row: HTMLElement, titleEl: HTMLElement): WorkspaceBadgeTarget | undefined => {
-    const key = row.getAttribute('data-row-key')
-    if (key !== null) {
-      const workspaceId = key.startsWith('workspace:') ? key.slice('workspace:'.length) : ''
-      return workspaceId === '' ? undefined : bindings.get(workspaceId)
-    }
-    return byUniqueTitle.get(titleEl.textContent?.trim() ?? '')
-  }
-  // Local anchor (and its forward-slash spelling) → the remote label the shell
-  // hover card should display; shared with the file-panel address rewrite.
-  const labels = anchorLabels(workspaces)
+): WorkspaceBadgesHandle {
   ensureSpinnerStyle()
+  let state: DecorationState = {
+    bindings,
+    labels: anchorLabels(workspaces),
+    connected,
+    connecting,
+  }
+  let disposed = false
+  let scheduled = false
+
+  /** Resolve the badge a row shows from its native workspace id alone. */
+  const targetForRow = (row: HTMLElement): WorkspaceBadgeTarget | undefined => {
+    const key = row.getAttribute('data-row-key')
+    if (key === null || !key.startsWith(WORKSPACE_KEY_PREFIX)) return undefined
+    const workspaceId = key.slice(WORKSPACE_KEY_PREFIX.length)
+    return workspaceId === '' ? undefined : state.bindings.get(workspaceId)
+  }
 
   /** Decorate one project row: mount/replace the badge with the row's live
    *  connection state (connected / connecting / disconnected).
    *
-   *  The row tooltip is NOT ours to own any more. The shell renders its own
-   *  styled bubble showing the workspace PATH — the local anchor for an SSH
-   *  workspace — and an extra `<title>` here produced a SECOND tooltip (the
-   *  remote label) right after it. Instead the shell's bubble text is rewritten
-   *  by `patchTooltips()`, so there is exactly one tooltip and it shows the
-   *  remote directory. A stale `<title>` left by an older build of this plugin
-   *  is cleared here so an upgraded session heals without a reload. */
+   *  The row tooltip is NOT ours to own: the shell renders its own styled
+   *  bubble showing the workspace PATH — the local anchor for an SSH
+   *  workspace — and an extra `<title>` here produced a SECOND tooltip. The
+   *  shell's bubble text is rewritten by `patchTooltips()`, so there is exactly
+   *  one tooltip and it shows the remote directory. A stale `<title>` left by
+   *  an older build of this plugin is cleared here. */
   const decorate = (row: HTMLElement): void => {
-    const titleEl = row.querySelector<HTMLElement>(TITLE_SELECTOR)
-    if (titleEl === null || titleEl === undefined) return
-    const target = targetForRow(row, titleEl)
+    const target = targetForRow(row)
     const existing = row.querySelector<HTMLElement>('[data-ssh-badge]')
     if (target === undefined) {
-      // A stale badge (record removed, workspace unregistered) must not linger.
+      // A row without a readable native workspace id cannot be matched safely;
+      // guessing by title is what made the badge add/remove itself in a loop.
       if (existing !== null) existing.remove()
       return
     }
+    const titleEl = row.querySelector<HTMLElement>(TITLE_SELECTOR)
+    if (titleEl === null || titleEl === undefined) return
     // Heal a title this plugin used to set, and drop a shell-provided <title>
     // whose text is the local anchor (that would be a native duplicate of the
     // bubble `patchTooltips` already fixes).
     if (row.title !== '') row.removeAttribute('title')
     const stale = titleEl.getAttribute('title')
-    if (stale !== null && replaceAnchorPaths(stale, labels) !== stale) titleEl.removeAttribute('title')
-    const state = connecting?.has(target.alias) === true
+    if (stale !== null && replaceAnchorPaths(stale, state.labels) !== stale) titleEl.removeAttribute('title')
+    const badgeState = state.connecting?.has(target.alias) === true
       ? 'connecting'
-      : connected?.has(target.alias) === true ? 'connected' : 'disconnected'
+      : state.connected?.has(target.alias) === true ? 'connected' : 'disconnected'
     const expectedTitle = `${target.remoteRoot}（${target.alias}）`
     if (existing !== null) {
       // Update in place so a connect-state flip (spinner ⇄ cloud) is visible
       // without remounting the row; replace when the bound target changed.
       if (
-        existing.dataset.sshBadge !== state
+        existing.dataset.sshBadge !== badgeState
         || existing.title !== expectedTitle
         || existing.textContent !== target.alias
       ) {
-        existing.replaceWith(makeBadge(target.alias, target.remoteRoot, state))
+        existing.replaceWith(makeBadge(target.alias, target.remoteRoot, badgeState))
       }
       return
     }
-    titleEl.appendChild(makeBadge(target.alias, target.remoteRoot, state))
+    titleEl.appendChild(makeBadge(target.alias, target.remoteRoot, badgeState))
   }
 
   /** Rewrite the shell's hover card: its `hoverPath` row prints the workspace
@@ -228,12 +252,10 @@ export function mountWorkspaceBadges(
    *
    *  dsh 0.2.1 renders this card as `WorkspaceHoverContent` with hashed classes
    *  (`…_hoverPath`, `…_hoverContent`), NOT a `role="tooltip"` bubble, so both
-   *  shapes are matched. Runs on every observed mutation (the card mounts on
-   *  hover) and is idempotent: once the text no longer contains an anchor
-   *  nothing changes, so a React re-render either keeps the patched text or gets
-   *  patched again. */
+   *  shapes are matched. Runs on every pass (the card mounts on hover) and is
+   *  idempotent: once the text no longer contains an anchor nothing changes. */
   const patchTooltips = (): void => {
-    if (labels.size === 0) return
+    if (state.labels.size === 0) return
     const tips = document.querySelectorAll<HTMLElement>(
       '[class*="hoverPath"], [class*="hoverContent"], [role="tooltip"], [class*="tooltip"], [class*="Tooltip"]',
     )
@@ -242,7 +264,7 @@ export function mountWorkspaceBadges(
       const walker = document.createTreeWalker(tip, NodeFilter.SHOW_TEXT)
       for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
         const value = node.nodeValue ?? ''
-        const replaced = replaceAnchorPaths(value, labels)
+        const replaced = replaceAnchorPaths(value, state.labels)
         if (replaced !== value) node.nodeValue = replaced
       }
     }
@@ -250,23 +272,46 @@ export function mountWorkspaceBadges(
 
   /** Scan the sidebar column for project rows and decorate each. */
   const scan = (): void => {
-    for (const row of document.querySelectorAll<HTMLElement>(PROJECT_ROW_SELECTOR)) {
-      decorate(row)
-    }
+    for (const row of document.querySelectorAll<HTMLElement>(PROJECT_ROW_SELECTOR)) decorate(row)
   }
 
-  // Watch the whole document for the sidebar column arriving / re-rendering and
-  // for the shell's tooltip bubble mounting on hover.
-  const observer = new MutationObserver(() => { scan(); patchTooltips() })
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['title'] })
-  scan()
-  patchTooltips()
+  /** One complete pass; idempotent, so an unchanged row writes nothing. */
+  const run = (): void => {
+    scheduled = false
+    if (disposed) return
+    scan()
+    patchTooltips()
+  }
 
-  return () => {
-    observer.disconnect()
-    // Remove injected badges.
-    for (const badge of document.querySelectorAll<HTMLElement>('[data-ssh-badge]')) {
-      badge.remove()
-    }
+  /** Coalesce observer notifications into at most one pass per frame. */
+  const schedule = (): void => {
+    if (scheduled || disposed) return
+    scheduled = true
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run)
+    else setTimeout(run, 0)
+  }
+
+  // Watch the document for the sidebar column arriving / re-rendering and for
+  // the shell's tooltip bubble mounting on hover.
+  const observer = new MutationObserver(() => { schedule() })
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['title'] })
+  run()
+
+  return {
+    update(nextWorkspaces, nextBindings, nextConnected, nextConnecting) {
+      state = {
+        bindings: nextBindings,
+        labels: anchorLabels(nextWorkspaces),
+        connected: nextConnected,
+        connecting: nextConnecting,
+      }
+      run()
+    },
+    dispose() {
+      disposed = true
+      observer.disconnect()
+      // Remove injected badges.
+      for (const badge of document.querySelectorAll<HTMLElement>('[data-ssh-badge]')) badge.remove()
+    },
   }
 }

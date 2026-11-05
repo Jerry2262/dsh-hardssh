@@ -101,7 +101,7 @@ pnpm test          # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-默认测试基线：719 通过 + 3 skipped（真实 SSH 与本地真实 bwrap 为 opt-in；后者可用 `DSH_LIVE_BWRAP=1 pnpm vitest run tests/sandbox/bubblewrap.test.ts` 验证）。设计决策与已知限制见 [docs/decisions.md](./docs/decisions.md)，安全边界见 [SECURITY.md](./SECURITY.md)，插件适配手册见 [docs/adaptation.md](./docs/adaptation.md)。
+默认测试基线：721 通过 + 3 skipped（真实 SSH 与本地真实 bwrap 为 opt-in；后者可用 `DSH_LIVE_BWRAP=1 pnpm vitest run tests/sandbox/bubblewrap.test.ts` 验证）。设计决策与已知限制见 [docs/decisions.md](./docs/decisions.md)，安全边界见 [SECURITY.md](./SECURITY.md)，插件适配手册见 [docs/adaptation.md](./docs/adaptation.md)。
 
 ## 文档
 

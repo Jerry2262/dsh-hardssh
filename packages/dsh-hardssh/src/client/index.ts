@@ -190,26 +190,27 @@ export function apply(ctx: ClientContext): void {
     // connection. Titles are display-only natively and may repeat, so a
     // same-named local workspace is never decorated. The shell still exposes no
     // row-decoration slot, so this stays the documented DOM extension it always
-    // was (MutationObserver self-heal), unlike the session list below.
-    let badgesDispose: (() => void) | undefined
-    let filesPathDispose: (() => void) | undefined
+    // was, unlike the session list below.
+    //
+    // One pass per surface lives for the page's lifetime. The badge (alias and
+    // remote root) is fixed for a workspace's lifetime and only the connection
+    // state changes, so refreshes push inputs into the mounted pass instead of
+    // disposing and re-mounting it on every poll.
     let connectedAliases: ReadonlySet<string> = new Set<string>()
     let connectingAliases: ReadonlySet<string> = new Set<string>()
+    const badges = mountWorkspaceBadges([], new Map(), connectedAliases, connectingAliases)
+    const filesPath = mountWorkspaceFilesPathRemap([])
+    /** True when two alias sets hold exactly the same members. */
+    const sameAliases = (left: ReadonlySet<string>, right: ReadonlySet<string>): boolean =>
+      left.size === right.size && [...left].every((alias) => right.has(alias))
     const refreshBadges = (): void => {
       try {
         const workspaces = manager.getSnapshot().workspaces
         const nativeRows = nativeWorkspaces?.list.getSnapshot().items ?? []
-        badgesDispose?.()
-        badgesDispose = mountWorkspaceBadges(
-          workspaces,
-          badgeBindings(nativeRows, workspaces),
-          connectedAliases,
-          connectingAliases,
-        )
+        badges.update(workspaces, badgeBindings(nativeRows, workspaces), connectedAliases, connectingAliases)
         // The native file panel's address (anchor) is rewritten to the remote
         // root by the same workspace state (P1/UX-1).
-        filesPathDispose?.()
-        filesPathDispose = mountWorkspaceFilesPathRemap(workspaces.map((workspace) => ({
+        filesPath.update(workspaces.map((workspace) => ({
           anchorPath: workspace.anchorPath,
           remoteRoot: workspace.remoteRoot,
         })))
@@ -217,7 +218,7 @@ export function apply(ctx: ClientContext): void {
         console.warn('[dsh-hardssh] badge refresh failed:', error)
       }
     }
-    disposers.push(() => { badgesDispose?.(); filesPathDispose?.() })
+    disposers.push(() => { badges.dispose(); filesPath.dispose() })
     // Same-source sync: no independent workspace fetch — the manager emits on
     // its 3s poll and on create/remove/rename.
     disposers.push(manager.subscribe(() => { refreshBadges() }))
@@ -235,6 +236,9 @@ export function apply(ctx: ClientContext): void {
       const next = new Set(connectingAliases)
       if (state === 'connecting') next.add(alias)
       else next.delete(alias)
+      // A repeated state is not a change: refreshing for it would rebuild
+      // badges that are already correct.
+      if (sameAliases(connectingAliases, next)) return
       connectingAliases = next
       refreshBadges()
     }))
@@ -242,12 +246,17 @@ export function apply(ctx: ClientContext): void {
     // Connection-state poll: badge colors AND the gate's pass cache both key off
     // "which servers have a live pooled transport right now".
     const refreshConnections = async (): Promise<void> => {
+      let next: ReadonlySet<string>
       try {
-        connectedAliases = new Set(await sshApi.connectedAliases())
+        next = new Set(await sshApi.connectedAliases())
       } catch (error) {
         console.warn('[dsh-hardssh] connection-state poll failed:', error)
-        connectedAliases = new Set<string>()
+        next = new Set<string>()
       }
+      // Polling exists to notice a connect/disconnect, not to force a pass:
+      // unchanged connection state leaves the badges untouched.
+      if (sameAliases(connectedAliases, next)) return
+      connectedAliases = next
       refreshBadges()
     }
     const connTimer = window.setInterval(() => { void refreshConnections() }, 3000)

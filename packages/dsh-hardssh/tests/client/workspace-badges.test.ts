@@ -1,15 +1,14 @@
 // @vitest-environment jsdom
 /**
- * The shell-tooltip rewrite for SSH workspaces.
+ * Sidebar row decoration: binding, badge lifecycle and the mutation-loop
+ * regression.
  *
- * DSH renders its own styled tooltip bubble for a sidebar row and prints the
- * workspace PATH there. For an SSH workspace that path is the LOCAL anchor
- * directory (`~/.dsh/ssh-workspaces/<id>`) — meaningless to the user, who asked
- * to see the remote directory instead. The plugin added a second tooltip via a
- * row `<title>` attribute, which produced two cards in a row: the shell's (local
- * anchor) and then the plugin's (remote). The fix is one implementation: keep
- * the shell bubble and rewrite its text, which is what `replaceAnchorPaths`
- * does (the DOM walk itself needs a browser and is exercised in the GUI).
+ * The badge a row shows comes from the row's native workspace id
+ * (`data-row-key="workspace:<id>"`) and the binding table. The pass never
+ * guesses a row's identity from its title text: the badge is appended INSIDE
+ * the title element, so title matching read its own output back, flipped
+ * between "bound" and "unbound" on every pass, and add/removed the badge in a
+ * microtask loop that froze the page while a workspace was being deleted.
  */
 import { afterEach, describe, expect, it } from 'vitest'
 import { replaceAnchorPaths } from '../../src/client/anchor-display.ts'
@@ -119,27 +118,42 @@ describe('mountWorkspaceBadges', () => {
     return element
   }
 
+  function mount(inputs: {
+    workspaces?: readonly SshWorkspaceLike[]
+    bindings?: ReadonlyMap<string, { alias: string; remoteRoot: string }>
+    connected?: ReadonlySet<string>
+    connecting?: ReadonlySet<string>
+  } = {}) {
+    return mountWorkspaceBadges(
+      inputs.workspaces ?? [],
+      inputs.bindings ?? new Map(),
+      inputs.connected,
+      inputs.connecting,
+    )
+  }
+
   it('decorates only workspace rows bound to an SSH record', () => {
     const local = row('workspace:local-tmp', 'tmp')
     const remote = row('workspace:ssh-tmp', 'tmp')
     document.body.append(local, remote)
 
-    const dispose = mountWorkspaceBadges(
-      [SSH_WORKSPACE],
-      new Map([['ssh-tmp', { alias: 'aliyun', remoteRoot: '/srv/tmp' }]]),
-      new Set(['aliyun']),
-    )
+    const handle = mount({
+      workspaces: [SSH_WORKSPACE],
+      bindings: new Map([['ssh-tmp', { alias: 'aliyun', remoteRoot: '/srv/tmp' }]]),
+      connected: new Set(['aliyun']),
+    })
 
     expect(local.querySelector('[data-ssh-badge]')).toBeNull()
     const badge = remote.querySelector<HTMLElement>('[data-ssh-badge]')
     expect(badge?.textContent).toBe('aliyun')
     expect(badge?.title).toBe('/srv/tmp（aliyun）')
+    expect(badge?.dataset.sshBadge).toBe('connected')
 
-    dispose()
+    handle.dispose()
     expect(document.querySelector('[data-ssh-badge]')).toBeNull()
   })
 
-  it('removes a stale badge when a row is no longer bound', () => {
+  it('removes a stale badge when a keyed row is no longer bound', () => {
     const local = row('workspace:local-tmp', 'tmp')
     document.body.append(local)
     const stale = document.createElement('span')
@@ -147,30 +161,77 @@ describe('mountWorkspaceBadges', () => {
     stale.textContent = 'old'
     local.firstElementChild!.append(stale)
 
-    const dispose = mountWorkspaceBadges([], new Map())
+    const handle = mount()
     expect(local.querySelector('[data-ssh-badge]')).toBeNull()
-    dispose()
+    handle.dispose()
   })
 
-  it('falls back to a UNIQUE title only for rows without a native workspace key', () => {
+  it('never decorates a row without a native workspace key', () => {
+    // The badge lives inside the title element, so matching by title text
+    // would read the badge back as part of the title and flip forever.
     const legacy = row(undefined, 'tmp')
     document.body.append(legacy)
-    const dispose = mountWorkspaceBadges(
-      [SSH_WORKSPACE],
-      new Map(),
-    )
-    expect(legacy.querySelector('[data-ssh-badge]')?.textContent).toBe('aliyun')
-    dispose()
 
-    // Two SSH records sharing the title make the fallback ambiguous: no badge.
-    document.body.innerHTML = ''
-    const ambiguous = row(undefined, 'tmp')
-    document.body.append(ambiguous)
-    const disposeAmbiguous = mountWorkspaceBadges(
-      [SSH_WORKSPACE, { ...SSH_WORKSPACE, id: 'ssh-2', anchorPath: '/home/jerry/.dsh/ssh-workspaces/ssh-2' }],
-      new Map(),
+    const handle = mount({ workspaces: [SSH_WORKSPACE] })
+    expect(legacy.querySelector('[data-ssh-badge]')).toBeNull()
+
+    handle.update([SSH_WORKSPACE], new Map())
+    expect(legacy.querySelector('[data-ssh-badge]')).toBeNull()
+    handle.dispose()
+  })
+
+  it('is idempotent: an unchanged row produces no DOM write on a later pass', () => {
+    const remote = row('workspace:ssh-tmp', 'tmp')
+    document.body.append(remote)
+
+    const handle = mount({
+      workspaces: [SSH_WORKSPACE],
+      bindings: new Map([['ssh-tmp', { alias: 'aliyun', remoteRoot: '/srv/tmp' }]]),
+      connected: new Set(['aliyun']),
+    })
+    const badge = remote.querySelector<HTMLElement>('[data-ssh-badge]')
+    expect(badge).not.toBeNull()
+
+    const observer = new MutationObserver(() => {})
+    observer.observe(remote, { childList: true, subtree: true, attributes: true })
+    handle.update(
+      [SSH_WORKSPACE],
+      new Map([['ssh-tmp', { alias: 'aliyun', remoteRoot: '/srv/tmp' }]]),
+      new Set(['aliyun']),
     )
-    expect(ambiguous.querySelector('[data-ssh-badge]')).toBeNull()
-    disposeAmbiguous()
+    expect(observer.takeRecords()).toHaveLength(0)
+    expect(remote.querySelectorAll('[data-ssh-badge]')).toHaveLength(1)
+    expect(remote.querySelector('[data-ssh-badge]')).toBe(badge)
+
+    observer.disconnect()
+    handle.dispose()
+  })
+
+  it('re-renders the badge when the connection state changes', () => {
+    const remote = row('workspace:ssh-tmp', 'tmp')
+    document.body.append(remote)
+
+    const handle = mount({
+      workspaces: [SSH_WORKSPACE],
+      bindings: new Map([['ssh-tmp', { alias: 'aliyun', remoteRoot: '/srv/tmp' }]]),
+      connected: new Set(['aliyun']),
+    })
+    expect(remote.querySelector<HTMLElement>('[data-ssh-badge]')?.dataset.sshBadge).toBe('connected')
+
+    handle.update(
+      [SSH_WORKSPACE],
+      new Map([['ssh-tmp', { alias: 'aliyun', remoteRoot: '/srv/tmp' }]]),
+      new Set(),
+      new Set(['aliyun']),
+    )
+    expect(remote.querySelector<HTMLElement>('[data-ssh-badge]')?.dataset.sshBadge).toBe('connecting')
+
+    handle.update(
+      [SSH_WORKSPACE],
+      new Map([['ssh-tmp', { alias: 'aliyun', remoteRoot: '/srv/tmp' }]]),
+      new Set(),
+    )
+    expect(remote.querySelector<HTMLElement>('[data-ssh-badge]')?.dataset.sshBadge).toBe('disconnected')
+    handle.dispose()
   })
 })
