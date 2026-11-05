@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  bindingsForCwd,
   remoteBindings,
+  remoteExecutionNotice,
   rewriteGenerateOptions,
   rewriteValue,
   translateAnchorText,
@@ -86,6 +88,22 @@ describe('remote wire path translation', () => {
     expect(options.messages[0]?.content[0]?.text).toBe(binding.anchorPath)
     // No binding → the exact original object is passed through.
     expect(rewriteGenerateOptions(options, [])).toBe(options)
+  })
+
+  it('selects the binding that owns a session cwd, and nothing otherwise', () => {
+    const other: RemoteBinding = { anchorPath: '/home/me/.dsh/workspace-anchors/ws-2', remoteRoot: '/srv/other' }
+    expect(bindingsForCwd([binding, other], binding.anchorPath)).toEqual([binding])
+    expect(bindingsForCwd([binding, other], binding.anchorPath + '/src')).toEqual([binding])
+    expect(bindingsForCwd([binding, other], other.anchorPath)).toEqual([other])
+    expect(bindingsForCwd([binding], '/home/me/local')).toEqual([])
+    expect(bindingsForCwd([binding], undefined)).toEqual([])
+  })
+
+  it('states the remote execution fact once, without connection configuration', () => {
+    const notice = remoteExecutionNotice()
+    expect(notice).toContain('远端执行环境')
+    expect(notice).toContain('DSH 本体')
+    expect(notice).not.toMatch(/ssh|ssh_|alias|密码|端口/i)
   })
 
   it('collects SSH bindings from the ledger snapshot only', () => {

@@ -133,6 +133,20 @@ function priorityOf(name: string): number {
 }
 
 /**
+ * Drop client harness metadata (`DSH_*`: home, profile, web URL, …) from an
+ * explicit environment overlay. Those values describe the control side, not
+ * the server, and are never forwarded to remote commands.
+ */
+export function scrubClientHarnessEnv(explicit: Readonly<NodeJS.ProcessEnv> | undefined): NodeJS.ProcessEnv | undefined {
+  if (explicit === undefined) return undefined
+  const scrubbed: NodeJS.ProcessEnv = {}
+  for (const [name, value] of Object.entries(explicit)) {
+    if (!name.startsWith('DSH_')) scrubbed[name] = value
+  }
+  return scrubbed
+}
+
+/**
  * Overlay explicit entries and serialize one validated environment for `env -i`.
  * Login-critical names are emitted first (see CRITICAL_ENV_ORDER); everything
  * else keeps the remote's own order.

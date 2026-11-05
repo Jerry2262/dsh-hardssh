@@ -14,7 +14,7 @@ import type {
   SubprocessSpawnSpec,
 } from '@deepseek-ai/dsh-subprocess'
 import type { WorkspaceState } from '../protocol.ts'
-import { quoteShellArg, readScrubbedRemoteEnvironment, serializeEnvironment } from './environment.ts'
+import { quoteShellArg, readScrubbedRemoteEnvironment, scrubClientHarnessEnv, serializeEnvironment } from './environment.ts'
 import { SshOutputCollector } from './output.ts'
 
 function isCollect(mode: SubprocessOutputMode): mode is SubprocessCollect {
@@ -31,7 +31,10 @@ function resolveRemoteCwd(state: WorkspaceState, cwd: string | undefined): strin
 
 /** Build the remote command text: cd, env -i scrub, exec the argv. */
 async function buildCommand(engine: SshEngine, alias: string, state: WorkspaceState, spec: SubprocessSpawnSpec): Promise<string> {
-  const environment = serializeEnvironment(await readScrubbedRemoteEnvironment(engine, alias), spec.env)
+  const environment = serializeEnvironment(
+    await readScrubbedRemoteEnvironment(engine, alias),
+    scrubClientHarnessEnv(spec.env),
+  )
   const argv = spec.argv.map(quoteShellArg).join(' ')
   return `cd -- ${quoteShellArg(resolveRemoteCwd(state, spec.cwd))} && exec env -i -- ${environment} ${argv}`
 }

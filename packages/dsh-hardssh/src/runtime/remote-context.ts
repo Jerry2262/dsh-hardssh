@@ -16,6 +16,7 @@
 
 import { symbols } from '@deepseek-ai/cordis'
 import type { Context } from '@deepseek-ai/cordis'
+import { isPathUnderAnchor } from '../base/anchor-path.ts'
 import type { WorkspaceCore } from './workspace-core.ts'
 
 /** One anchor → remote-root pair the wire rewrite applies. */
@@ -33,6 +34,19 @@ export function remoteBindings(core: WorkspaceCore): RemoteBinding[] {
       const remoteRoot = record.location.root
       return anchorPath === '' || anchorPath === remoteRoot ? [] : [{ anchorPath, remoteRoot }]
     })
+}
+
+/**
+ * The binding whose anchor owns one session cwd. Requests are rewritten only
+ * for sessions actually bound to a remote workspace: a local session must keep
+ * the client harness context even when remote workspaces exist.
+ */
+export function bindingsForCwd(bindings: readonly RemoteBinding[], cwd: string | undefined): RemoteBinding[] {
+  if (cwd === undefined || cwd === '') return []
+  const match = bindings
+    .filter(binding => isPathUnderAnchor(binding.anchorPath, cwd))
+    .sort((a, b) => b.anchorPath.length - a.anchorPath.length)[0]
+  return match === undefined ? [] : [match]
 }
 
 /**
@@ -57,6 +71,18 @@ export function translateString(text: string, bindings: readonly RemoteBinding[]
   let out = text
   for (const binding of bindings) out = translateAnchorText(out, binding)
   return out
+}
+
+/**
+ * The one-line execution-environment fact a remote-bound session receives up
+ * front. Hiding the remote world is not achievable — the model can inspect the
+ * actual filesystem and environment — so the session is told what it would
+ * otherwise waste attention inferring: tools run in the remote environment, and
+ * client-side harness facts do not exist there. Connection configuration stays
+ * operator-side.
+ */
+export function remoteExecutionNotice(): string {
+  return '本会话的工具命令在远端执行环境运行，当前工作目录就是上面的远端路径；read / write / edit / bash / glob / grep 的用法与本地工作区一致。DSH 本体、Web GUI 和控制端元数据不在这个执行环境里；控制端的技能与配置目录只用于加载，不属于工作区，不需要去本机查找。'
 }
 
 /** Plain-object / array test that never traverses binary or class instances. */
@@ -135,7 +161,11 @@ interface LlmStreamLike {
  * change fails open (the original method is left untouched) instead of breaking
  * every model call.
  */
-export function mountRemoteWireTranslation(ctx: Context, bindings: () => RemoteBinding[]): void {
+export function mountRemoteWireTranslation(
+  ctx: Context,
+  bindings: () => RemoteBinding[],
+  sessionCwd: (sessionId: string | undefined) => string | undefined,
+): void {
   ctx.inject(['llm'], (scoped) => {
     const service = scoped.get('llm') as Partial<LlmStreamLike> | undefined
     // `ctx.get` returns a Cordis traceable proxy; its `symbols.original` slot is
@@ -147,9 +177,46 @@ export function mountRemoteWireTranslation(ctx: Context, bindings: () => RemoteB
     const original = target?.[method]
     if (target === undefined || typeof original !== 'function') return
     const patched = function (this: unknown, options: unknown, ...rest: unknown[]): unknown {
-      return original.call(this, rewriteGenerateOptions(options, bindings()), ...rest)
+      const sessionId = (options as { sessionId?: string } | undefined)?.sessionId
+      const pairs = bindingsForCwd(bindings(), sessionCwd(sessionId))
+      return original.call(this, rewriteGenerateOptions(options, pairs), ...rest)
     }
     return assignStream(target, method, original, patched)
+  })
+}
+
+/** Minimal system-prompt service shape for the optional notice section. */
+interface SystemPromptLike {
+  section?: (section: {
+    name: string
+    order: number
+    text: (context: unknown) => string
+  }) => (() => void) | undefined
+}
+
+/** The assembly context carries the agent whose session this request belongs to. */
+interface AssembleContextLike {
+  agent?: { session?: { header?: { cwd?: string } } }
+}
+
+/**
+ * Mount the one-line remote-execution notice as a system-prompt section. It is
+ * empty for local sessions, so local behavior is unchanged; remote sessions see
+ * the minimum fact that keeps them from investigating client/remote deltas.
+ */
+export function mountRemoteExecutionNotice(ctx: Context, bindings: () => RemoteBinding[]): void {
+  ctx.inject(['systemPrompt'], (scoped) => {
+    const systemPrompt = scoped.get('systemPrompt') as SystemPromptLike | undefined
+    if (typeof systemPrompt?.section !== 'function') return
+    const dispose = systemPrompt.section({
+      name: 'hardssh:execution-environment',
+      order: 160,
+      text: (context) => {
+        const cwd = (context as AssembleContextLike).agent?.session?.header?.cwd
+        return bindingsForCwd(bindings(), cwd).length === 0 ? '' : remoteExecutionNotice()
+      },
+    })
+    return dispose
   })
 }
 

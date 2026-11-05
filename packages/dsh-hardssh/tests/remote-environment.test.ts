@@ -9,6 +9,7 @@ import type { SshEngine } from '../src/ssh/engine.ts'
 import {
   invalidateRemoteEnvironment,
   readScrubbedRemoteEnvironment,
+  scrubClientHarnessEnv,
   serializeEnvironment,
 } from '../src/remote/environment.ts'
 
@@ -123,6 +124,16 @@ describe('readScrubbedRemoteEnvironment (P1-12)', () => {
     const serialized = serializeEnvironment(new Map([['HOME', '/root'], ['FOO', 'bar']]), { FOO: undefined })
     expect(serialized).toContain('HOME=/root')
     expect(serialized).not.toContain('FOO')
+  })
+
+  it('never forwards client harness DSH_* metadata to remote commands', () => {
+    expect(scrubClientHarnessEnv({
+      DSH_HOME: '/client/.dsh',
+      DSH_WEB_URL: 'http://127.0.0.1:3099',
+      DSH_SESSION_ID: 'session-x',
+      FOO: 'bar',
+    })).toEqual({ FOO: 'bar' })
+    expect(scrubClientHarnessEnv(undefined)).toBeUndefined()
   })
 
   it('fills HOME from the passwd entry when the login dump carries none', async () => {

@@ -27,6 +27,7 @@ incident; everything below is the constraint set around it.
 | Host identity | trust-on-first-use; a changed host key re-prompts | `src/ssh/…` |
 | Remote file operations | every path is resolved and confined to the workspace's remote root; a symlink that escapes fails closed | `src/remote/remote-fs.ts` (`confine`) |
 | Local workspace operations | confined to the local workspace root; shell spawns get the same root jail | `src/providers/local/provider.ts` (`assertInsideRoot`) |
+| Client-side exceptions in a bound session | `$DSH_HOME` and `~/.agents` stay local (`localRoots`), so skills/config/state remain readable; client-native tools (`pwsh`, `cmd`, `*.exe`) spawn on the client; the vault directory is denied. A bound session is **not** fully isolated from the client machine | `src/fs.ts`, `src/switch/switch-fs.ts`, `src/switch/switch-subprocess.ts` |
 | Command policy (optional) | per-host deny/allow for command **names** and regexes, enforced at the `bash` tool layer and at the subprocess seam. Documented as a **guardrail, not a sandbox** | `src/ssh/command-policy.ts` |
 | Outbound network | only the SSH hosts the user configured — no telemetry, no third-party endpoint anywhere in `src/` | — |
 

@@ -46,7 +46,7 @@ import { withSshConfig } from './ssh/ssh-config.ts'
 import { Vault } from './ssh/vault.ts'
 import { mountWorkspaceCore, genericLedgerPath, type WorkspaceCore } from './runtime/workspace-core.ts'
 import { mountHardsshHealth, watchHardsshOptionalServices } from './runtime/health.ts'
-import { mountRemoteWireTranslation, remoteBindings } from './runtime/remote-context.ts'
+import { mountRemoteExecutionNotice, mountRemoteWireTranslation, remoteBindings } from './runtime/remote-context.ts'
 import { inspectGenericLedger, recoverGenericLedger } from './runtime/workspace-recovery.ts'
 
 /** Stable cordis plugin name. */
@@ -308,9 +308,16 @@ export function apply(ctx: Context, config?: Config): void {
 
   // Last model-visible boundary: a bound session's kernel cwd is the local
   // anchor, while bash runs on the server. Rewrite the outgoing request paths to
-  // the remote root so the model sees one consistent working directory. This is
-  // presentation only — fs/subprocess routing still keys off the anchor.
-  mountRemoteWireTranslation(ctx, () => remoteBindings(genericCore))
+  // the remote root so the model sees one consistent working directory, and tell
+  // remote sessions the one fact they would otherwise waste attention inferring.
+  // Presentation only — fs/subprocess routing still keys off the anchor.
+  const sessionCwd = (sessionId: string | undefined): string | undefined => {
+    if (sessionId === undefined) return undefined
+    const sessions = ctx.get('sessions') as { get?: (id: string) => { header?: { cwd?: string } } | undefined } | undefined
+    return sessions?.get?.(sessionId)?.header?.cwd
+  }
+  mountRemoteWireTranslation(ctx, () => remoteBindings(genericCore), sessionCwd)
+  mountRemoteExecutionNotice(ctx, () => remoteBindings(genericCore))
 
   // SSH-specific integrations retain only the shared host store and engine.
   // dsh-workbench consumes `workspaceCore` directly; no sshWorkspaceCore or

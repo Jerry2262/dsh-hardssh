@@ -16,11 +16,13 @@
 - **远端 subprocess seam 可以绕过 `commandPolicy`**：被替换的 `ctx.subprocess` 允许任意插件在绑定会话里 spawn 远端进程；`commandPolicy` 只按命令名/正则拦截，`$(…)`、base64、脚本调用都能绕过。影响：登录节点限制不是硬边界。**待处理**。
 - **`danger-full-access` 下远端 `write` / `edit` 仍被限制在远端工作区根**：`write-fence` 对 danger 放行（[src/sandbox/write-fence.ts](packages/dsh-hardssh/src/sandbox/write-fence.ts) 第 30 行），但 `RemoteFileSystem.confineRoot` 无条件拒绝根外路径（[src/remote/remote-fs.ts](packages/dsh-hardssh/src/remote/remote-fs.ts) 第 178 行，`workspace.ssh-outside-root`）；本地 danger 不限制路径。影响：同一权限模式下本地/远端语义不一致。**待处理**。
 - **`RemoteFileSystem` 的读取范围也受工作区根限制**：读 `/etc/os-release` 这类根外路径会被拒，而模型没有收到这一限制的提示，可能反复尝试。影响：多轮无效操作。**待处理**。
+- **远端会话仍能读取控制端的 DSH 基础设施目录**：`localRoots`（`$DSH_HOME`、`~/.agents`，见 [src/fs.ts](packages/dsh-hardssh/src/fs.ts)）对远端绑定会话仍按本地路由，模型可以用 `read` / `glob` / `grep` 读取技能、profile、会话日志、`dsh-hardssh-ssh.json` 等控制端文件；vault 目录被显式拒绝。影响：本地 DSH 配置暴露给远端会话模型，且与“控制端元数据不在执行环境”的前置说明并存，模型仍可能发现本地/远端分裂。**待决策**（是否对远端会话关闭 `localRoots` 的本地读，或把这层例外也前置说明）。
+- **Windows 客户端原生工具在远端会话中仍本地执行**：`src/switch/switch-subprocess.ts` 把 `pwsh` / `powershell` / `cmd` / `*.exe` 视为 client tool，绑定远端工作区时仍在本机 spawn。影响：远端会话并非完全隔离于本地机器，模型可通过这些工具读本机信息。**待决策**。
 - **arm64 `landlock-run` 资产未在真机验证**：目前只有 x86_64 的 aliyun + WSL 实测。**等待外部条件**（ARM 主机）。
 
 ## 2. 测试覆盖
 
-- **真实 SSH 不在默认套件或 CI 中**：live SSH 用例默认跳过（需 `DSH_LIVE_SSH=1`），默认 672 通过 + 1 skipped；真实远端行为只靠手工会话验收。影响：远端回归可能逃过测试。**待处理**。
+- **真实 SSH 不在默认套件或 CI 中**：live SSH 用例默认跳过（需 `DSH_LIVE_SSH=1`），默认 675 通过 + 1 skipped；真实远端行为只靠手工会话验收。影响：远端回归可能逃过测试。**待处理**。
 
 ## 3. 宿主升级适配
 
