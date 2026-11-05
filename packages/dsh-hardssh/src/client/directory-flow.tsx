@@ -68,9 +68,10 @@ export interface DirectoryFlowInjected {
     user: string
     auth: { kind: 'password'; password: string } | { kind: 'key'; keyPath: string; passphrase?: string }
   }) => Promise<{ alias: string; host: string; port: number; user: string }>
-  /** Register an add-server password in the engine's session-only secret table.
-   *  `secretStorage='none'` keeps it out of the host store, so without this the
-   *  first directory browse would ask for the same password again. */
+  /** Register an add-server password in the engine's session secret table.
+   *  With `secretStorage='none'` (or a plain host whose password was not
+   *  saved) the first directory browse would ask for the same password again;
+   *  seeding it here avoids that second prompt. */
   rememberSessionSecret: (alias: string, password: string) => Promise<void>
   /** Browse a remote directory (host API). */
   listRemoteDir: (alias: string, path?: string) => Promise<{ path: string; entries: Array<{ name: string; type: 'dir' | 'file' | 'other'; size: number; mtimeMs: number }> }>

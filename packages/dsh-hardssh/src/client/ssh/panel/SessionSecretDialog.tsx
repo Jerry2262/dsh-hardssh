@@ -1,10 +1,10 @@
 /**
  * Session secret dialog (VSCode Remote-SSH style): shown when a connection
- * needs a password/passphrase that the user hasn't entered this session
- * (secretStorage='none' → secrets are never persisted). The credential is
- * sent once to the host via /api/dsh-hardssh/ssh/session-secret, held in the engine's
+ * needs a password/passphrase that is not stored on disk (secretStorage='none',
+ * or a plain host saved without a password yet). The credential is sent once to
+ * the host via /api/dsh-hardssh/ssh/session-secret, held in the engine's
  * in-memory session table for the connection-pool lifetime, and dropped on
- * process exit. Nothing is written to disk.
+ * process exit. Nothing is written to disk by this dialog.
  */
 import { useState } from 'react'
 import type { SshApi } from '../api.ts'

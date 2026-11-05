@@ -64,7 +64,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 | Key | Type | Default | 含义 |
 | --- | --- | --- | --- |
 | `enabled` | boolean | `true` | SSH 工作区界面开关：控制工作区 CRUD 路由与工作区面板；连接配置路由、fs/subprocess seam 与连接池不受影响 |
-| `secretStorage` | enum | `none` | 凭据策略：`none` = 密码不落盘、连接时输入；`vault` = AES-256-GCM + scrypt 加密存储 |
+| `secretStorage` | enum | `plain` | 凭据策略：`plain` = 密码/口令明文存于 0600 主机配置文件；`none` = 不落盘、连接时输入；`vault` = AES-256-GCM + scrypt 加密存储 |
 | `vaultAutoUnlock` | enum | `off` | 是否允许用 `DSH_CREDENTIAL_PASSWORD` 在加载时自动解锁 vault；默认关闭 |
 
 示例（`cordis.patch.yml` 的 `hardssh` 行）：
@@ -73,7 +73,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 - id: hardssh
   name: '@jerry/dsh-hardssh'
   config:
-    secretStorage: none   # 或 vault
+    secretStorage: plain   # plain（默认）/ none / vault
 ```
 
 ## 远端沙箱前置条件
@@ -85,7 +85,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 
 ## 数据位置
 
-- 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600）
+- 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600；`secretStorage: plain` 时密码/口令也在这里）
 - 加密凭据：`~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`（被 fs seam 拒绝访问）
 - 工作区台账：`~/.dsh/workspaces/index.v1.json`；anchor：`~/.dsh/workspaces/anchors`、`~/.dsh/workspace-anchors/`（旧版 `~/.dsh/ssh-workspaces/` 继续兼容）
 - 主机密钥信任：`~/.dsh/ssh-known-hosts.json`
@@ -100,7 +100,7 @@ pnpm test          # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-默认测试基线：699 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](./docs/decisions.md)，安全边界见 [SECURITY.md](./SECURITY.md)，插件适配手册见 [docs/adaptation.md](./docs/adaptation.md)。
+默认测试基线：703 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](./docs/decisions.md)，安全边界见 [SECURITY.md](./SECURITY.md)，插件适配手册见 [docs/adaptation.md](./docs/adaptation.md)。
 
 ## 文档
 
@@ -120,7 +120,7 @@ pnpm build
 
 **如何切换服务器？** 切换会话：每个会话绑定一个 SSH 工作区。要换机器就在面板里添加另一个工作区并新建会话。
 
-**密码存哪里？** 默认不落盘（`secretStorage: none`，连接时输入一次，按连接存活期复用）；`vault` 模式加密存于 `~/.dsh/ssh-secrets/`，该目录被 fs seam 显式拒绝。
+**密码存哪里？** 默认明文存放在主机配置文件 `~/.dsh/dsh-hardssh-ssh.json` 里（文件 0600、目录 0700），服务重启后不需要重新输入；`secretStorage: none` 改为不落盘、只在连接存活期复用内存凭据，`vault` 模式则用 AES-256-GCM 加密存于 `~/.dsh/ssh-secrets/`（该目录被 fs seam 显式拒绝）。
 
 **为什么远端命令比本地慢？** 每次工具调用都是一次 SSH 往返；连接池会复用传输，但延迟仍取决于网络 RTT。
 

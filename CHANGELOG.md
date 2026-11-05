@@ -10,10 +10,11 @@
 - **seam 替换**：`hardssh-fs` / `hardssh-subprocess` / `hardssh-shell` 替换部署自带的 `fs-sandbox` / `subprocess` / `bash-sandbox`，按会话 cwd 路由；本地会话行为不变。
 - **远端执行一致性**：模型可见 cwd、文件路径与 `bash pwd` 同为远端路径；系统提示一句远端执行说明；远端命令环境剥离客户端 `DSH_*` 元数据。
 - **远端沙箱**：自动部署 `landlock-run`，`read-only` / `workspace-write` 在远端生效；旧内核部分强制并在 stderr 提示；不可用时 fail closed。探测失败会附带远端内核版本、LSM 列表、`lsm=` 启动参数与 `CONFIG_SECURITY_LANDLOCK` 编译状态，便于定位原因。
+- **凭据默认持久化**：`secretStorage` 新增 `plain` 并作为默认值——密码/口令明文存于 `~/.dsh/dsh-hardssh-ssh.json`（0600、目录 0700），重启后不再重新输入；`none`（不落盘）与 `vault`（AES-256-GCM + scrypt）保留为可选项。
 - **SSH 操作日志**：面板内折叠区，只记录插件管理操作（连接测试、目录浏览、工作区创建、沙箱部署），含原始命令、退出码、stderr；内存环形缓冲、脱敏、不落盘。面板呈现为一条按时间正序的输出流（等宽字体、自动跟随底部、用户上翻时暂停跟随），不做逐操作折叠卡片。
 - **GUI 流程**：添加服务器 → 连接闸门（主机指纹/会话密码）→ 远端目录浏览 → 创建工作区，失败可恢复；闸门提示置于浏览器顶层，不再被面板或目录弹窗遮挡。
 - **包标识**：npm 包改为 `@jerry/dsh-hardssh`，版本归零为 0.1.0；路由、远端状态目录、本地配置文件名保持不变。
-- 默认套件 **699 通过 + 1 skipped**，typecheck/build 通过。
+- 默认套件 **703 通过 + 1 skipped**，typecheck/build 通过。
 
 以下为 0.1.0 之前并入本版本的修复与改进（原「未发布」段）：
 

@@ -23,7 +23,7 @@ incident; everything below is the constraint set around it.
 |---|---|---|
 | HTTP REST (`/api/dsh-hardssh/ssh/*`, `/api/dsh-hardssh/*`) | loopback peer **and** loopback `Host` header **and** same-origin (`Origin` / `Sec-Fetch-Site`) — a DNS-rebound page cannot reach it | `src/host-http.ts`, `src/routes.ts`, `src/ssh/routes.ts` (`guard()`) |
 | Host configuration | `~/.dsh/dsh-hardssh-ssh.json`, written `0600` inside a `0700` directory | `src/ssh/store.ts` |
-| Credentials | **not persisted by default** (`secretStorage: none`): session memory only, reused for the lifetime of a pooled connection. Opt-in `vault` mode encrypts with AES-256-GCM + scrypt (`0600`), and that directory is refused by the fs seam even in a bound session | `src/ssh/vault.ts`, `src/fs.ts` (`deniedRoots`) |
+| Credentials | **stored inline by default** (`secretStorage: plain`): password/passphrase live in `~/.dsh/dsh-hardssh-ssh.json` (0600, 0700 dir) so a restart does not re-prompt — anyone who can read that file can read the credentials. `none` keeps them in session memory only; `vault` encrypts with AES-256-GCM + scrypt (`0600`), and that directory is refused by the fs seam even in a bound session | `src/ssh/store.ts`, `src/ssh/vault.ts`, `src/fs.ts` (`deniedRoots`) |
 | Host identity | trust-on-first-use; a changed host key re-prompts | `src/ssh/…` |
 | Remote file operations | every path is resolved and confined to the workspace's remote root; a symlink that escapes fails closed | `src/remote/remote-fs.ts` (`confine`) |
 | Local workspace operations | confined to the local workspace root; shell spawns get the same root jail | `src/providers/local/provider.ts` (`assertInsideRoot`) |
@@ -43,8 +43,7 @@ be confined by the client's kernel. The plugin states that boundary instead of h
 - No reading of credential files. The plugin never opens SSH private-key files. The only
   `~/.ssh` interaction is the explicit **"Import ~/.ssh/config"** action (reads host entries)
   and the private-key **path** the user types into the add-host form.
-- No credential exfiltration path: with the default storage the password/passphrase never
-  reaches disk, and no code path sends it anywhere except the SSH handshake.
+- No credential exfiltration path: with the default `plain` storage the password/passphrase is written to the 0600 host config file and read back for the SSH handshake; no code path sends it anywhere else. `vault` mode keeps it encrypted at rest.
 - No destructive operation outside the resolved workspace root, no privilege escalation, no
   persistence installation (no cron/systemd/rc files, no `authorized_keys` writes).
 
@@ -85,7 +84,8 @@ otherwise.
 - `.ssh` 命中只是界面提示文案（已改写为不带 `.ssh` 路径的通用提示）；
 - 测试里的 `127.0.0.1` 是**回环守卫的断言**本身，正是防 DNS rebinding / 跨站请求的回归用例。
 
-凭据默认不落盘（`vault` 模式为 AES-256-GCM + scrypt，且该目录被 fs seam 拒绝访问）；源码中
+凭据默认以明文存于 0600 的主机配置文件（`secretStorage: plain`），能读到该文件即可读到凭据；
+`none` 模式不落盘，`vault` 模式为 AES-256-GCM + scrypt 加密且该目录被 fs seam 拒绝访问。源码中
 没有任何第三方外联地址，出站连接只有用户配置的 SSH 主机；命令策略是**护栏而非沙箱**，硬约束
 应放在服务器侧。
 

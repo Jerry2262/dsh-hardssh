@@ -73,15 +73,18 @@ export interface Config {
    */
   enabled: boolean
   /**
-   * Secret storage mode: 'none' (default, VSCode Remote-SSH style: passwords
-   * never persisted, prompted once per session) or 'vault' (encrypted at
-   * rest, for unattended agents).
+   * Secret storage mode:
+   * - 'plain' (default): the password/passphrase is stored inline in the host
+   *   config file (`~/.dsh/dsh-hardssh-ssh.json`, 0600 inside a 0700 dir), so a
+   *   restart does not re-prompt.
+   * - 'none': secrets are never persisted; prompted once per connection.
+   * - 'vault': encrypted at rest (AES-256-GCM + scrypt) for unattended agents.
    *
    * This is the SINGLE SOURCE for the mode: the Vault and SecureHostStore are
    * constructed once from it when the plugin loads, so changing it requires a
    * plugin reload.
    */
-  secretStorage: 'none' | 'vault'
+  secretStorage: 'none' | 'plain' | 'vault'
   /**
    * Whether the credential vault may auto-unlock from the
    * `DSH_CREDENTIAL_PASSWORD` environment variable at plugin load.
@@ -95,17 +98,20 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   enabled: z.boolean().default(true),
-  secretStorage: z.union([z.const('none'), z.const('vault')]).default('none'),
+  secretStorage: z.union([z.const('none'), z.const('plain'), z.const('vault')]).default('plain'),
   vaultAutoUnlock: z.union([z.const('off'), z.const('env')]).default('off'),
 })
 
 /**
  * The ONE effective secretStorage mode: the plugin config value, defaulting to
- * 'none'. The Vault and SecureHostStore are constructed from this value once
- * (plugin load), which is what makes it authoritative.
+ * 'plain' (credentials in the 0600 host config file). The Vault and
+ * SecureHostStore are constructed from this value once (plugin load), which is
+ * what makes it authoritative.
  */
-export function resolveSecretStorageMode(config?: { secretStorage?: unknown }): 'none' | 'vault' {
-  return config?.secretStorage === 'vault' ? 'vault' : 'none'
+export function resolveSecretStorageMode(config?: { secretStorage?: unknown }): 'none' | 'plain' | 'vault' {
+  const mode = config?.secretStorage
+  if (mode === 'none' || mode === 'vault') return mode
+  return 'plain'
 }
 
 /** Isolated-path options for one generic startup (tests inject temp dirs). */
@@ -237,7 +243,8 @@ export async function reconcileHostWorkspacesOnStartup(deps: HostWorkspaceReconc
 export function apply(ctx: Context, config?: Config): void {
   const resolved = {
     enabled: config?.enabled ?? true,
-    // Secret storage: 'none' (VSCode Remote-SSH style; default) or 'vault'.
+    // Secret storage: 'plain' (default: inline in the 0600 host config),
+    // 'none' (never persisted) or 'vault' (encrypted at rest).
     // Single-sourced: the Vault/SecureHostStore below are built from THIS value.
     secretStorage: resolveSecretStorageMode(config),
     // Env-based vault auto-unlock is opt-in (see the Config docs): the variable
@@ -258,11 +265,12 @@ export function apply(ctx: Context, config?: Config): void {
   // the engine falls back to pre-security behavior when no store is passed.
   const knownHosts = new KnownHostsStore()
   // Credential handling per secretStorage:
-  // - 'vault': encrypt at rest (AES-256-GCM + scrypt) via SecureHostStore;
-  //   for unattended agents running password hosts.
-  // - 'none' (default): passwords are NEVER persisted — they are prompted
-  //   once (VSCode Remote-SSH style) and held in the engine's in-memory table
-  //   for that CONNECTION's lifetime (the pool's retirement drops them).
+  // - 'plain' (default): the password/passphrase stays inline in the 0600 host
+  //   config file, so a restart does not re-prompt.
+  // - 'none': passwords are NEVER persisted — prompted once (VSCode
+  //   Remote-SSH style) and held in the engine's in-memory table for that
+  //   CONNECTION's lifetime (the pool's retirement drops them).
+  // - 'vault': encrypt at rest (AES-256-GCM + scrypt) for unattended agents.
   const vault = resolved.secretStorage === 'vault'
     ? new Vault(undefined, { allowEnvUnlock: resolved.vaultAutoUnlock === 'env' })
     : undefined

@@ -459,18 +459,20 @@ export interface ResolvedAuth {
  * key paths — non-secrets) with the credential handling chosen by
  * `secretStorage`:
  *
+ * - **'plain' (default)**: the password/passphrase is stored INLINE in the
+ *   host config file (`hosts.json`, written 0600 inside a 0700 directory), so
+ *   a restart does not re-prompt. Encryption / OS-keyring storage can replace
+ *   this later without changing the API.
+ *
  * - **'vault'**: passwords/passphrases are stored encrypted in the
  *   credential vault (AES-256-GCM); the hosts file keeps only a `secretRef`,
  *   and resolveAuth reveals on demand. For headless agents running password
  *   hosts unattended.
  *
- * - **'none' (default, VSCode Remote-SSH style)**: secrets are NEVER
- *   persisted. create/update strip the password/passphrase from the entry
- *   (kind + keyPath stay); the engine prompts once and holds the credential
- *   in-memory for that CONNECTION's lifetime (the pool's retirement drops it).
- *   The plaintext HostStore
- *   remains untouched, so existing v1 tests and dual-format reads keep
- *   working.
+ * - **'none' (VSCode Remote-SSH style)**: secrets are NEVER persisted.
+ *   create/update strip the password/passphrase from the entry (kind + keyPath
+ *   stay); the engine prompts once and holds the credential in-memory for that
+ *   CONNECTION's lifetime (the pool's retirement drops it).
  */
 export class SecureHostStore {
   private readonly inner: HostStore
@@ -480,7 +482,7 @@ export class SecureHostStore {
     private readonly vault: import('./vault.ts').Vault | undefined,
     path?: string,
     sshConfigOverride?: string,
-    private readonly mode: 'none' | 'vault' = 'none',
+    private readonly mode: 'none' | 'plain' | 'vault' = 'plain',
   ) {
     this.inner = new HostStore(path, sshConfigOverride)
   }
@@ -536,12 +538,12 @@ export class SecureHostStore {
     for (const ref of [...this.pendingSecretCleanup]) await this.removeSecret(ref)
   }
 
-  /** Create: secrets are staged, then rolled back if host persistence fails. */
+  /** Create: secrets are staged (vault), kept inline (plain), or stripped (none). */
   async create(payload: HostPayload): Promise<SshHostEntry> {
-    // Validate the raw wire input first. In 'none' mode a password-kind host
-    // may omit the password (typed at connect time, VSCode-style); 'vault'
-    // mode keeps the strict rule so every credential gets stashed.
-    const rawError = validateHostPayload(payload, 'create', this.mode === 'none')
+    // Validate the raw wire input first. Outside vault mode a password-kind host
+    // may omit the password (typed at connect time, VSCode-style); vault mode
+    // keeps the strict rule so every credential gets stashed.
+    const rawError = validateHostPayload(payload, 'create', this.mode !== 'vault')
     if (rawError !== undefined) throw new Error(rawError)
     await this.retryPendingCleanup()
     const ref = await this.stashSecrets(payload.alias ?? '', payload.auth)
@@ -556,13 +558,13 @@ export class SecureHostStore {
     }
   }
 
-  /** Update: auth present -> re-stash (or strip in none mode); absent → keep. */
+  /** Update: auth present -> re-stash (vault), keep inline (plain) or strip (none). */
   async update(alias: string, patch: Partial<HostPayload>): Promise<SshHostEntry> {
     const existing = this.inner.find(alias)
     if (patch.auth === undefined || existing === undefined) {
       return this.inner.update(alias, patch)
     }
-    const rawError = validateHostPayload(patch, 'patch', this.mode === 'none')
+    const rawError = validateHostPayload(patch, 'patch', this.mode !== 'vault')
     if (rawError !== undefined) {
       // 'vault' mode: a password-kind patch without a password is acceptable
       // when the existing entry already holds a secretRef — the user edited
@@ -605,15 +607,15 @@ export class SecureHostStore {
     if (entry?.auth.secretRef !== undefined) await this.removeSecret(entry.auth.secretRef)
   }
 
-  /** Resolve the authentication for one entry (vault reveal when needed). */
+  /** Resolve the authentication for one entry (vault reveal / inline value). */
   async resolveAuth(entry: SshHostEntry): Promise<ResolvedAuth> {
     if (this.mode === 'vault' && entry.auth.secretRef !== undefined && this.vault !== undefined) {
       const secret = await this.vault.reveal(entry.auth.secretRef)
       if (entry.auth.kind === 'password') return { kind: 'password', password: secret }
       return { kind: 'key', keyPath: entry.auth.keyPath, passphrase: secret !== '' ? secret : undefined }
     }
-    // Plaintext fallback (tests, hand-edited files): reachable in none mode
-    // only when an entry still carries inline secrets.
+    // 'plain' entries carry the inline password/passphrase; the same fallback
+    // also serves hand-edited files that still contain inline secrets.
     return { kind: entry.auth.kind, keyPath: entry.auth.keyPath, password: entry.auth.password, passphrase: entry.auth.passphrase }
   }
 
@@ -635,9 +637,11 @@ export class SecureHostStore {
 
 /** Strip secrets from a payload according to mode + stored ref.
  *  - vault mode with ref: carry the ref, drop plaintext.
+ *  - plain mode: keep the payload untouched (inline persistence is the point).
  *  - none mode: drop the plaintext (never persist), keep kind + keyPath. */
-function stripSecrets<T extends HostPayload | Partial<HostPayload>>(payload: T, ref: string | undefined, mode: 'none' | 'vault'): T {
+function stripSecrets<T extends HostPayload | Partial<HostPayload>>(payload: T, ref: string | undefined, mode: 'none' | 'plain' | 'vault'): T {
   if (payload.auth === undefined) return payload
+  if (mode === 'plain') return payload
   const auth = payload.auth
   if (mode === 'vault' && ref !== undefined) {
     return {

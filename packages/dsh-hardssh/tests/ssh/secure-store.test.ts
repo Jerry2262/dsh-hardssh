@@ -1,7 +1,7 @@
 /**
- * SecureHostStore tests: secretStorage='none' (VSCode Remote-SSH style —
- * passwords NEVER persisted; kind + keyPath kept, secrets dropped) and
- * secretStorage='vault' (encrypted at rest via secretRef). No network.
+ * SecureHostStore tests: secretStorage='plain' (default — inline in the 0600
+ * host file), 'none' (VSCode Remote-SSH style — passwords NEVER persisted) and
+ * 'vault' (encrypted at rest via secretRef). No network.
  */
 
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -10,11 +10,12 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { SecureHostStore } from '../../src/ssh/store.ts'
 import { Vault } from '../../src/ssh/vault.ts'
+import { resolveSecretStorageMode } from '../../src/index.ts'
 import type { HostPayload } from '../../src/ssh/protocol.ts'
 
 const dirs: string[] = []
 
-function makeStore(mode: 'none' | 'vault'): { store: SecureHostStore; path: string } {
+function makeStore(mode: 'none' | 'plain' | 'vault'): { store: SecureHostStore; path: string } {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-ssh-secure-'))
   dirs.push(dir)
   const path = join(dir, 'hosts.json')
@@ -43,6 +44,60 @@ const passwordPayload: HostPayload = {
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
+})
+
+describe('SecureHostStore (plain mode — inline credentials, the default)', () => {
+  it('persists the password inline and resolves it without a prompt', async () => {
+    const { store, path } = makeStore('plain')
+    const entry = await store.create(passwordPayload)
+    expect(readFileSync(path, 'utf8')).toContain('s3cret!')
+    expect(entry.auth.password).toBe('s3cret!')
+
+    const resolved = await store.resolveAuth(entry)
+    expect(resolved).toEqual({ kind: 'password', password: 's3cret!' })
+    // The browser/agent projection stays secret-free.
+    expect('password' in store.summarize(entry)).toBe(false)
+  })
+
+  it('updates the stored password and keeps it when only other fields change', async () => {
+    const { store, path } = makeStore('plain')
+    await store.create(passwordPayload)
+    await store.update('web-01', { auth: { kind: 'password', password: 'rotated' } })
+    expect(readFileSync(path, 'utf8')).toContain('rotated')
+    expect(readFileSync(path, 'utf8')).not.toContain('s3cret!')
+
+    await store.update('web-01', { description: 'renamed note' })
+    const entry = store.find('web-01')!
+    expect((await store.resolveAuth(entry)).password).toBe('rotated')
+    expect(entry.description).toBe('renamed note')
+  })
+
+  it('persists key passphrases inline as well', async () => {
+    const { store, path } = makeStore('plain')
+    await store.create({
+      alias: 'keyhost',
+      host: 'h',
+      port: 22,
+      user: 'u',
+      auth: { kind: 'key', keyPath: '/home/u/keys/project-key', passphrase: 'pp-secret' },
+    })
+    expect(readFileSync(path, 'utf8')).toContain('pp-secret')
+  })
+
+  it('is the default mode of the constructor and of the plugin config', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-ssh-secure-default-'))
+    dirs.push(dir)
+    const path = join(dir, 'hosts.json')
+    const store = new SecureHostStore(undefined, path)
+    await store.create(passwordPayload)
+    expect(readFileSync(path, 'utf8')).toContain('s3cret!')
+
+    expect(resolveSecretStorageMode(undefined)).toBe('plain')
+    expect(resolveSecretStorageMode({})).toBe('plain')
+    expect(resolveSecretStorageMode({ secretStorage: 'none' })).toBe('none')
+    expect(resolveSecretStorageMode({ secretStorage: 'vault' })).toBe('vault')
+    expect(resolveSecretStorageMode({ secretStorage: 'bogus' })).toBe('plain')
+  })
 })
 
 describe('SecureHostStore (none mode — VSCode Remote-SSH style)', () => {

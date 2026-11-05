@@ -48,7 +48,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 
 ## 数据目录
 
-- 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600）
+- 主机配置：`~/.dsh/dsh-hardssh-ssh.json`（0600；默认 `secretStorage: plain`，密码/口令也在这个文件里）
 - 加密凭据（`secretStorage: vault`）：`~/.dsh/ssh-secrets/dsh-hardssh-ssh-vault.json`
 - 工作区台账与 anchor：`~/.dsh/workspaces/index.v1.json`、`~/.dsh/workspaces/anchors`、`~/.dsh/workspace-anchors/`（旧版 `ssh-workspaces/` 继续兼容）
 - 主机密钥信任：`~/.dsh/ssh-known-hosts.json`
@@ -60,7 +60,7 @@ dsh plugin --profile web add link:<repo>/packages/dsh-hardssh
 - 远端路径必须落在工作区远端根内；symlink 逃逸 fail closed。
 - vault 目录被 `SwitchFileSystem.deniedRoots` 显式拒绝。
 - 远端沙箱依赖对方内核 Landlock ABI；较旧内核只能部分强制，stderr 会打印提示，不会静默降级。
-- 凭据默认不落盘；`vault` 模式加密存储，`DSH_CREDENTIAL_PASSWORD` 自动解锁默认关闭。
+- 凭据默认以明文存于 0600 的主机配置文件（`secretStorage: plain`）；`none` 不落盘，`vault` 加密存储且 `DSH_CREDENTIAL_PASSWORD` 自动解锁默认关闭。
 
 ## 开发
 
@@ -70,7 +70,7 @@ pnpm test        # 默认套件；真实 SSH 用例需 DSH_LIVE_SSH=1
 pnpm build
 ```
 
-测试基线：699 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](../../docs/decisions.md)。
+测试基线：703 通过 + 1 skipped（live SSH opt-in）。设计决策与已知限制见 [docs/decisions.md](../../docs/decisions.md)。
 
 ## License
 
