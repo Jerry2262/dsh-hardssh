@@ -4,11 +4,11 @@
  * Local sessions confine through the same injected `ctx.sandbox` provider the
  * native sandbox executor used: this executor extends the local executor and
  * wraps the exact bash argv with the session's policy. SSH-bound sessions run
- * through the vendored remote Landlock launcher instead: the local sandbox
+ * through a verified remote Landlock or bubblewrap backend: the local sandbox
  * never wraps a command that will execute on another machine.
  *
- * The remote launcher is provisioned by `RemoteSandboxProvisioner`; a host
- * that cannot provide it fails closed here instead of running unconfined.
+ * The remote backend is selected by `RemoteSandboxProvisioner`; a host
+ * without a verified runner fails closed. User commands are never replayed.
  * `danger-full-access` is the one mode that runs without the launcher,
  * mirroring the native executor.
  *
@@ -27,6 +27,7 @@ import { shellQuote } from './shell.ts'
 import type { WorkspaceCore } from './runtime/workspace-core.ts'
 import type { RemoteSandboxProvisioner } from './sandbox/remote-sandbox.ts'
 import { grantArgs } from './sandbox/landlock.ts'
+import { bubblewrapArgs } from './sandbox/bubblewrap.ts'
 
 /** The remote world owning one synthetic (anchor) cwd. When the caller asked
  *  for an explicit REMOTE workdir, `remoteWorkdir` carries it and the command
@@ -162,7 +163,10 @@ class RemoteBashExecutor extends LocalBashExecutor {
     // Fail closed: provisioning throws with the actionable reason (unsupported
     // host, Landlock missing, upload failure) instead of running unconfined.
     const state = await sandbox.ensure(world.alias)
-    const argv = [state.runnerPath, ...grantArgs(mode, world.remoteRoot), '--', 'bash', '-c', command]
+    const profile = state.backend === 'bubblewrap'
+      ? bubblewrapArgs(mode, world.remoteRoot)
+      : grantArgs(mode, world.remoteRoot)
+    const argv = [state.runnerPath, ...profile, '--', 'bash', '-c', command]
     const execution = await this.executeArgv(spawnSpec, argv)
     return this.decorate(execution, { mode, denied: false, enforcement: state.enforcement }, () => sandbox.invalidate(world.alias))
   }
@@ -222,7 +226,8 @@ class RemoteBashExecutor extends LocalBashExecutor {
     let decorated: Promise<ShellRunResult> | undefined
     execution.result = () => {
       decorated ??= base().then((result) => {
-        if (result.exitCode === 125 && result.stderr.text.includes('landlock-run:')) {
+        if ((result.exitCode === 125 && result.stderr.text.includes('landlock-run:')) ||
+            (result.exitCode !== 0 && result.stderr.text.includes('bwrap:'))) {
           // The deployed launcher failed (removed on the host, kernel change,
           // …): forget the cached verdict so the next call re-provisions.
           onLauncherFailure?.()

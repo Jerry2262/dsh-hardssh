@@ -60,6 +60,8 @@ function harness(options: {
   remoteRoot?: string
   enforcement?: 'full' | 'partial'
   withProvisioner?: boolean
+  backend?: 'landlock' | 'bubblewrap'
+  result?: { exitCode: number; stderr: string }
 } = {}): Stubs {
   const anchor = options.anchor
   const remoteRoot = options.remoteRoot ?? '/remote/root'
@@ -74,7 +76,8 @@ function harness(options: {
   const ensure = vi.fn(async (alias: string) => ({
     alias,
     arch: 'linux-x64',
-    runnerPath: '/remote/home/.dsh-hardssh/sandbox/runner-abc/landlock-run',
+    runnerPath: options.backend === 'bubblewrap' ? '/usr/bin/bwrap' : '/remote/home/.dsh-hardssh/sandbox/runner-abc/landlock-run',
+    backend: options.backend,
     sha256: 'abc',
     enforcement: options.enforcement ?? 'partial',
   }))
@@ -119,7 +122,13 @@ function harness(options: {
       : argvOrPrepare as string[]
     spawns.push([...argv])
     spawnCwds.push(spec.workdir)
-    return execution()
+    const running = execution()
+    if (options.result !== undefined) {
+      const result = options.result
+      const original = running.result.bind(running)
+      running.result = async () => ({ ...(await original()), exitCode: result.exitCode, stderr: { text: result.stderr, truncated: false } })
+    }
+    return running
   })
   return { ctx, shell, spawns, spawnCwds, confine, ensure, invalidate }
 }
@@ -178,6 +187,46 @@ describe('routed shell executor over a real Cordis context', () => {
 
     expect(h.spawnCwds[0]).toBe(anchor)
     expect(h.spawns[0]!.slice(-3)).toEqual(['bash', '-c', "cd -- '/remote/sub' && pwd"])
+  })
+
+  it.each(['read-only', 'workspace-write'] as const)('uses the selected bwrap backend for %s', async mode => {
+    const anchor = `${anchorRoot()}/ws-1`
+    const h = harness({ anchor, backend: 'bubblewrap', enforcement: 'full' })
+    const spec = h.shell.resolve({ command: 'echo user-command', workdir: anchor, sandboxPolicy: policy(anchor, mode) })
+    const result = await (await h.shell.execute(spec)).result()
+    const argv = h.spawns[0]!
+    expect(argv[0]).toBe('/usr/bin/bwrap')
+    expect(argv).toContain('--unshare-user')
+    expect(argv).toContain('--ro-bind')
+    expect(argv).toContain('--cap-drop')
+    expect(argv.includes('--bind')).toBe(mode === 'workspace-write')
+    expect(argv.includes('--tmpfs')).toBe(mode === 'workspace-write')
+    expect(argv.slice(-4)).toEqual(['--', 'bash', '-c', 'echo user-command'])
+    expect(result.sandbox).toEqual({ mode, denied: false, enforcement: 'full' })
+  })
+
+  it.each([
+    ['bubblewrap', 1, 'bwrap: Creating new namespace failed'],
+    ['landlock', 125, 'landlock-run: failed'],
+  ] as const)('never replays the user command after %s runner failure', async (backend, exitCode, stderr) => {
+    const anchor = `${anchorRoot()}/ws-1`
+    const h = harness({ anchor, backend, result: { exitCode, stderr } })
+    const spec = h.shell.resolve({ command: 'touch /remote/root/once', workdir: anchor, sandboxPolicy: policy(anchor) })
+    const running = await h.shell.execute(spec)
+    await expect(running.result()).rejects.toThrow('remote sandbox runner failed')
+    await expect(running.result()).rejects.toThrow('remote sandbox runner failed')
+    expect(h.spawns).toHaveLength(1)
+    expect(h.ensure).toHaveBeenCalledTimes(1)
+    expect(h.invalidate).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not switch backend on an ordinary nonzero user-command exit', async () => {
+    const anchor = `${anchorRoot()}/ws-1`
+    const h = harness({ anchor, backend: 'bubblewrap', result: { exitCode: 2, stderr: 'application failed' } })
+    const spec = h.shell.resolve({ command: 'exit 2', workdir: anchor, sandboxPolicy: policy(anchor) })
+    expect((await (await h.shell.execute(spec)).result()).exitCode).toBe(2)
+    expect(h.spawns).toHaveLength(1)
+    expect(h.invalidate).not.toHaveBeenCalled()
   })
 
   it('fails closed instead of running locally when the remote provisioner is missing', async () => {

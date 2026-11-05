@@ -1,6 +1,6 @@
 /**
  * Opt-in live check against a real configured SSH host (`DSH_LIVE_SSH=1`):
- * provisions the vendored Landlock launcher, runs a command through it, and
+ * selects a verified remote sandbox backend, runs a command through it, and
  * verifies the read-only profile really denies an out-of-workspace write.
  * Never runs in the default suite.
  */
@@ -12,6 +12,7 @@ import { KnownHostsStore } from '../../src/ssh/known-hosts.ts'
 import { withSshConfig } from '../../src/ssh/ssh-config.ts'
 import { RemoteSandboxProvisioner } from '../../src/sandbox/remote-sandbox.ts'
 import { grantArgs } from '../../src/sandbox/landlock.ts'
+import { bubblewrapArgs } from '../../src/sandbox/bubblewrap.ts'
 import { shellQuote } from '../../src/shell.ts'
 
 const HOST = process.env.DSH_LIVE_SSH_HOST ?? 'aliyun'
@@ -36,7 +37,7 @@ describe.skipIf(!enabled)('remote sandbox (live)', () => {
 
       const wrap = (mode: 'read-only' | 'workspace-write', script: string): string => [
         'cd --', shellQuote(ROOT), '&&', shellQuote(state.runnerPath),
-        ...grantArgs(mode, ROOT).map(shellQuote), '--',
+        ...(state.backend === 'bubblewrap' ? bubblewrapArgs(mode, ROOT) : grantArgs(mode, ROOT)).map(shellQuote), '--',
         'bash', '-c', shellQuote(script),
       ].join(' ')
 

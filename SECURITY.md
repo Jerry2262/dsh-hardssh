@@ -33,7 +33,14 @@ incident; everything below is the constraint set around it.
 | Outbound network | only the SSH hosts the user configured — no telemetry, no third-party endpoint anywhere in `src/` | — |
 
 The local OS sandbox does **not** constrain remote execution: a process on the server cannot
-be confined by the client's kernel. The plugin states that boundary instead of hiding it.
+be confined by the client's kernel. Confined remote bash first selects a verified Landlock
+runner or, when the Landlock availability probe fails, installed bubblewrap. Bubblewrap
+must pass absolute-path/version discovery and real namespace/read-only/workspace-write
+confinement probes. It uses a read-only root, private device/PID mounts, dropped capabilities,
+and, for workspace-write, a writable workspace plus private ephemeral `/tmp`; networking
+remains that of the remote host. No verified backend means refusal; deployment or denial-test
+failure stops selection, and runner failures never replay the user command on another backend.
+The explicit danger-full-access preset keeps its existing unwrapped execution semantics.
 
 ## 3. What it does not do
 

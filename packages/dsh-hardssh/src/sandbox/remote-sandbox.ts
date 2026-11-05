@@ -1,18 +1,15 @@
 /**
- * Remote sandbox provisioning: put the vendored Landlock launcher on a bound
- * host and prove it enforces before any remote command is allowed to run.
- *
- * This is the plugin's declared precondition, in the spirit of VS Code Remote
- * installing its server into `~/.vscode-server`: everything the plugin can
- * provision on its own is provisioned (user-writable home, no root, no sudo,
- * no package manager). Only conditions the plugin cannot fix — a non-Linux
- * host, an unsupported architecture, a kernel without Landlock — fail closed
- * with an actionable error instead of degrading to unconfined execution.
+ * Remote sandbox selection happens before user commands: deploy and verify
+ * the vendored Landlock launcher; when its availability probe fails, discover
+ * and functionally verify installed bubblewrap. Both runners enforce the
+ * confined presets. A failed confinement check never permits an unconfined
+ * command or a replay on another runner. No root/package-manager operations.
  *
  * @module dsh-hardssh/sandbox/remote-sandbox
  */
 
 import { posix } from 'node:path'
+import { bubblewrapArgs } from './bubblewrap.ts'
 import type { SshEngine } from '../ssh/engine.ts'
 import type { OperationLog, OperationRecord } from '../ssh/operation-log.ts'
 import { shellQuote as quoteShellArg } from '../shell.ts'
@@ -48,6 +45,9 @@ export class RemoteSandboxError extends Error {
   }
 }
 
+/** Only the functional Landlock availability probe permits backend selection. */
+class LandlockUnavailableError extends RemoteSandboxError {}
+
 /** One provisioned host's facts. */
 export interface RemoteSandboxState {
   alias: string
@@ -57,6 +57,10 @@ export interface RemoteSandboxState {
   /** Content hash of the exact binary deployed there. */
   sha256: string
   enforcement: LandlockEnforcement
+  /** Absent means Landlock for existing fixtures/consumers. */
+  backend?: 'landlock' | 'bubblewrap'
+  /** Installed bwrap version; sha256 is empty for this system-owned binary. */
+  version?: string
 }
 
 /** What the provisioner needs from the engine (narrow for tests). */
@@ -181,9 +185,19 @@ export class RemoteSandboxProvisioner {
       const dir = posix.join(home, REMOTE_STATE_DIR, 'sandbox', `runner-${asset.sha256.slice(0, 12)}`)
       const runnerPath = posix.join(dir, LAUNCHER_BIN)
       await this.deployIfStale(record, alias, asset, dir, runnerPath)
-      const enforcement = await this.probe(record, alias, runnerPath)
+      let enforcement: LandlockEnforcement
+      try {
+        enforcement = await this.probe(record, alias, runnerPath)
+      } catch (error) {
+        // Selection is infrastructure-only, before any user command. A broken
+        // denial check is a security failure, never a reason to try another runner.
+        if (!(error instanceof LandlockUnavailableError)) throw error
+        const alternative = await this.probeBubblewrap(record, alias, arch, home, error)
+        this.log?.finish(record, 'ok')
+        return alternative
+      }
       this.log?.finish(record, 'ok')
-      return { alias, arch, runnerPath, sha256: asset.sha256, enforcement }
+      return { alias, arch, runnerPath, sha256: asset.sha256, enforcement, backend: 'landlock' }
     } catch (error: unknown) {
       this.log?.finish(record, 'failed', errorMessage(error), failureDetail(error))
       throw error
@@ -265,8 +279,8 @@ export class RemoteSandboxProvisioner {
       // entry, or a container that blocks the syscall.
       const facts = await this.kernelFacts(record, alias)
       const factsSuffix = facts === undefined ? '' : ` [${facts}]`
-      throw new RemoteSandboxError(
-        `remote sandbox: the kernel on '${alias}' does not enforce Landlock${factsSuffix} (${detail}); DSH needs Linux 5.13+ with Landlock enabled`,
+      throw new LandlockUnavailableError(
+        `remote sandbox: the kernel on '${alias}' does not enforce Landlock${factsSuffix} (${detail}); the Landlock backend requires Linux 5.13+ with Landlock enabled`,
         'REMOTE_SANDBOX_PROBE_FAILED',
       )
     }
@@ -299,6 +313,43 @@ export class RemoteSandboxProvisioner {
       )
     }
     return enforcement
+  }
+
+  /** Discover and functionally verify installed bwrap before selecting it. */
+  private async probeBubblewrap(
+    record: OperationRecord | undefined, alias: string, arch: RunnerArch, home: string,
+    landlockError: Error,
+  ): Promise<RemoteSandboxState> {
+    try {
+      const found = await this.execOk(record, alias,
+        'p=$(command -v bwrap) || exit 1; case "$p" in /*) ;; *) exit 1 ;; esac; test -f "$p" && test -x "$p" || exit 1; printf "%s\\n" "$p"; "$p" --version',
+        'bubblewrap discovery')
+      const [runnerPath = '', version = ''] = found.stdout.trim().split('\n')
+      if (!runnerPath.startsWith('/') || !/^bubblewrap\s+\d+\.\d+/.test(version)) {
+        throw new Error('bwrap discovery did not return an absolute executable path and bubblewrap version')
+      }
+      const ro = [runnerPath, ...bubblewrapArgs('read-only', '/')].map(quoteShellArg).join(' ')
+      // Create controlled writable fixtures OUTSIDE the sandbox. The positive
+      // baseline prevents a denied host filesystem from yielding a false pass.
+      // mktemp + trap guarantee only this probe's own files are removed.
+      const setup = `set -eu; d=$(mktemp -d -- ${quoteShellArg(posix.join(home, '.dsh-hardssh', '.bwrap-probe.XXXXXX'))}); trap 'rm -rf -- "$d"' EXIT; mkdir "$d/work"; printf original > "$d/outside"; printf original > "$d/work/inside"; `
+      const readonly = `${ro} -- sh -c ${quoteShellArg('set -eu; test "$(cat "$1/outside")" = original; if printf forbidden > "$1/outside"; then exit 9; fi; if printf forbidden > "$1/work/inside"; then exit 9; fi; printf ok > /dev/null')} sh "$d"`
+      // Expand the per-probe workspace path in the management shell, never as
+      // user-supplied shell text. /tmp is private and discarded at runner exit.
+      const rw = [runnerPath, ...bubblewrapArgs('workspace-write', '__WORKSPACE__')]
+        .map(arg => arg === '__WORKSPACE__' ? '"$d/work"' : quoteShellArg(arg)).join(' ')
+      const writable = `${rw} -- sh -c ${quoteShellArg('set -eu; printf allowed > "$1/work/inside"; printf temporary > /tmp/dsh-bwrap-probe; if printf forbidden > "$1/outside"; then exit 9; fi; printf ok > /dev/null')} sh "$d"`
+      const verified = await this.execOk(record, alias,
+        `${setup}${readonly}; ${writable}; test "$(cat "$d/outside")" = original; test "$(cat "$d/work/inside")" = allowed; printf 'bwrap confinement verified\\n'`,
+        'bubblewrap namespace and write confinement probe')
+      if (verified.stdout.trim() !== 'bwrap confinement verified') throw new Error('missing bwrap confinement verification marker')
+      return { alias, arch, runnerPath, sha256: '', enforcement: 'full', backend: 'bubblewrap', version }
+    } catch (error) {
+      throw new RemoteSandboxError(
+        `${landlockError.message}; bubblewrap unavailable: ${errorMessage(error)}; no verified remote sandbox backend is available`,
+        'REMOTE_SANDBOX_PROBE_FAILED',
+      )
+    }
   }
 
   /** Best-effort kernel facts for a failed Landlock probe (never throws). */
@@ -346,7 +397,7 @@ function failureDetail(error: unknown): string | undefined {
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
-    /** Provisioner for the vendored remote Landlock launcher (host scope). */
+    /** Verified remote sandbox backend selection (host scope). */
     hardsshSandbox: RemoteSandboxProvisioner
   }
 }

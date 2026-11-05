@@ -11,7 +11,7 @@
 | `host.test` | 面板的连接测试按钮 / 连接闸门的探测 |
 | `workspace.browse` | 目录浏览（解析 `$HOME`、SFTP 列目录） |
 | `workspace.create` | 创建工作区（`realpath`、`stat`、台账写入、主机工作区注册） |
-| `sandbox.deploy` | Landlock 启动器部署（平台探测、`mkdir`、上传、`chmod`、探测、只读冒烟测试） |
+| `sandbox.deploy` | 沙箱准备与后端选择（Landlock 部署/探测；必要时 bwrap 路径/版本与 namespace、读写围栏探测） |
 
 会话里的执行信息不进入日志：模型调用的 `bash`、`read` / `write` / `edit`、`glob` / `grep` 属于会话轨迹，已经在对话里记录。这样做的原因有两条：
 

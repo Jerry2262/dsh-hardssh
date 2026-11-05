@@ -70,7 +70,7 @@ stateDiagram-v2
 
 1. 校验 alias、远端根为绝对路径、主机存在。
 2. 远端 `realpath` + `stat` 确认目录存在且是目录（不存在 → 400）。
-3. `RemoteSandboxProvisioner.ensure(alias)`：探测平台、解析 `$HOME`、按需上传 `landlock-run`、功能探测 + 只读冒烟测试（失败 → 502，工作区不创建）。
+3. `RemoteSandboxProvisioner.ensure(alias)`：探测平台、解析 `$HOME`、按需上传并验证 `landlock-run`；Landlock 可用性探测失败时验证已安装 bwrap（绝对路径、版本、namespace、只读拒绝及工作区写入围栏）。没有验证通过的后端则拒绝创建；部署或拒绝测试失败即停止。
 4. 写入工作区台账，注册为原生 DSH 工作区；注册失败时补偿删除本次创建的记录。
 
 第 2～4 步都会进入 SSH 操作日志（`workspace.create` 与 `sandbox.deploy`），失败时可在面板里展开查看原始命令与 stderr。

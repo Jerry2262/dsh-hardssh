@@ -36,7 +36,7 @@
 │                  │                                              │      │
 │  ┌───────────────▼──────────────┐              ┌───────────────▼─────┐ │
 │  │ RemoteSandboxProvisioner     │              │ OperationLog        │ │
-│  │ 探测 + 上传 landlock-run     │              │ 管理操作日志（内存）│ │
+│  │ 验证 Landlock / bubblewrap   │              │ 管理操作日志（内存）│ │
 │  └──────────────────────────────┘              └───────────┬─────────┘ │
 │                                                            │ /console  │
 └────────────────────────────────────────────────────────────┬───────────┘
@@ -72,7 +72,7 @@ provider 无关的通用底座，不含 SSH、不含 Cordis、不含 React：
 
 - `fs.ts` + `switch/switch-fs.ts` — `ctx.fs` 按会话 cwd 路由到本地或远端 `workspace.fs`；`localRoots`（`$DSH_HOME`、`~/.agents`）与 vault 目录保持本地路由。
 - `subprocess.ts` + `switch/switch-subprocess.ts` — `ctx.subprocess` 同理；客户端原生二进制留在本机。
-- `shell-executor.ts` — `bash` 工具的远端执行：先确保 Landlock 启动器可用，再以 `landlock-run <grant> -- bash -c <command>` 运行；本地模式走原生本地沙箱。
+- `shell-executor.ts` — `bash` 工具的远端执行：先取得验证通过的后端，再以 `landlock-run <grant> -- bash -c <command>` 或 `bwrap <profile> -- bash -c <command>` 执行一次；运行失败不切换后端重跑。本地模式走原生本地沙箱。
 
 ### 1.4 远端实现（`src/remote/*`）
 
@@ -92,8 +92,9 @@ provider 无关的通用底座，不含 SSH、不含 Cordis、不含 React：
 
 ### 1.6 远端沙箱（`src/sandbox/*`）
 
-- `remote-sandbox.ts` — 探测平台 → 解析 `$HOME` → 上传 `landlock-run` → 功能探测 + 只读拒绝冒烟测试；结果按主机缓存，失败不缓存。探测失败时补一次诊断命令，把 kernel 版本、LSM 列表、启动参数 `lsm=` 与 `CONFIG_SECURITY_LANDLOCK` 编译状态写进错误与操作日志；不满足条件即拒绝，没有无沙箱降级路径。
+- `remote-sandbox.ts` — 探测平台 → 解析 `$HOME` → 上传 `landlock-run` → 功能探测 + 只读拒绝冒烟测试。仅 Landlock 可用性探测失败时选择已安装 bwrap，核对绝对路径/版本并用独立临时文件验证只读拒绝、工作区可写、区外拒绝和 `/tmp`。结果按主机缓存，失败不缓存；Landlock 内核诊断与 bwrap 探测都进入管理日志。部署或拒绝验证失败即停止，没有无沙箱执行路径。
 - `landlock.ts` — 内置启动器资产（按架构与哈希区分）。
+- `bubblewrap.ts` — user/PID namespace、只读根、基本设备与只读 `/proc`，移除 capabilities；`workspace-write` 额外 bind 工作区并提供独立 `/tmp`，网络沿用远端环境。
 - `write-fence.ts` — 本地写入边界。
 
 ### 1.7 操作日志（`src/ssh/operation-log.ts`）
@@ -125,7 +126,7 @@ provider 无关的通用底座，不含 SSH、不含 Cordis、不含 React：
 工具 → ctx.shell → shell-executor
                         ├─ 本地世界 → 原生本地沙箱执行
                         └─ 远端世界 → RemoteSandboxProvisioner.ensure(alias)
-                                        → landlock-run <grant> -- bash -c <command>
+                                        → 所选 runner <profile> -- bash -c <command>
                                         → 远端 subprocess → openExec → SSH exec
 ```
 
@@ -143,7 +144,7 @@ provider 无关的通用底座，不含 SSH、不含 Cordis、不含 React：
 
 ## 3. 会话与工作区绑定
 
-1. 面板创建远端工作区时，先在远端做 `realpath` + `stat` 校验，再确保 Landlock 启动器可用，最后写入台账并注册为原生 DSH 工作区。
+1. 面板创建远端工作区时，先在远端做 `realpath` + `stat` 校验，再确保远端沙箱后端已验证可用，最后写入台账并注册为原生 DSH 工作区。
 2. anchor 目录（`~/.dsh/workspace-anchors/<id>`）是会话 cwd 的占位；每次工具调用只带 cwd，不带会话身份。
 3. 路由按 cwd 与 anchor 做最长匹配：命中远端工作区就走远端能力，未命中即本地。
 4. 模型请求发送前，`remote-context.ts` 把 anchor 路径翻译成远端路径，保证模型看到的 cwd 与 `bash pwd` 一致。

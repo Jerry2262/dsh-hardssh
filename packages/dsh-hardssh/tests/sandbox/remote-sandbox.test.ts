@@ -55,6 +55,71 @@ function happyScript(remoteHash: string) {
   }
 }
 
+describe('RemoteSandboxProvisioner bubblewrap selection', () => {
+  function bwrapScript(command: string): ExecResult {
+    if (command.includes('command -v bwrap')) return ok('/usr/bin/bwrap\nbubblewrap 0.8.0\n')
+    if (command.includes('.bwrap-probe.XXXXXX')) return ok('bwrap confinement verified\n')
+    if (command.includes('--probe')) return { ...ok(), success: false, exitCode: 125, stderr: 'landlock-run: unavailable' }
+    return happyScript('')(command)
+  }
+
+  it('selects a verified absolute bwrap executable and caches the result', async () => {
+    const fake = fakeEngine(bwrapScript)
+    const log = new OperationLog()
+    const provisioner = new RemoteSandboxProvisioner(fake.engine, { log })
+    const [state, concurrent] = await Promise.all([provisioner.ensure('zen5'), provisioner.ensure('zen5')])
+    expect(state).toBe(concurrent)
+    expect(state).toMatchObject({ backend: 'bubblewrap', runnerPath: '/usr/bin/bwrap', version: 'bubblewrap 0.8.0', enforcement: 'full' })
+    const count = fake.commands.length
+    expect(await provisioner.ensure('zen5')).toBe(state)
+    expect(fake.commands).toHaveLength(count)
+    expect(log.snapshot().entries[0]?.status).toBe('ok')
+    const probe = fake.commands.find(command => command.includes('.bwrap-probe.XXXXXX'))!
+    expect(probe).toContain('--unshare-user')
+    expect(probe).toContain('--remount-ro')
+    expect(probe).toContain('--tmpfs')
+    expect(probe).toContain('outside')
+    expect(probe).toContain('original')
+    expect(probe).toContain('allowed')
+    expect(probe).toContain('trap')
+  })
+
+  it.each([
+    ['/usr/bin/bwrap\nbubblewrap 0.8.0\n', 'bwrap: Creating new namespace failed: Operation not permitted'],
+    ['/usr/bin/bwrap\nbubblewrap 0.8.0\n', 'write confinement failed'],
+  ])('fails closed when the bwrap functional probe fails: %s %s', async (discovery, stderr) => {
+    const fake = fakeEngine(command => {
+      if (command.includes('command -v bwrap')) return ok(discovery)
+      if (command.includes('.bwrap-probe.XXXXXX')) return { ...ok(), success: false, exitCode: 1, stderr }
+      return bwrapScript(command)
+    })
+    const provisioner = new RemoteSandboxProvisioner(fake.engine)
+    await expect(provisioner.ensure('zen5')).rejects.toThrow(stderr)
+    expect(provisioner.stateFor('zen5')).toBeUndefined()
+  })
+
+  it.each(['bwrap\nbubblewrap 0.8.0\n', '/usr/bin/bwrap\nnot bubblewrap\n', ''])('rejects invalid discovery output %j', async output => {
+    const fake = fakeEngine(command => command.includes('command -v bwrap') ? ok(output) : bwrapScript(command))
+    await expect(new RemoteSandboxProvisioner(fake.engine).ensure('zen5')).rejects.toMatchObject({ code: 'REMOTE_SANDBOX_PROBE_FAILED' })
+    expect(fake.commands.some(command => command.includes('.bwrap-probe.XXXXXX'))).toBe(false)
+  })
+
+  it('preserves both errors when bwrap is absent', async () => {
+    const fake = fakeEngine(command => command.includes('command -v bwrap')
+      ? { ...ok(), success: false, exitCode: 1, stderr: 'bwrap not found' }
+      : bwrapScript(command))
+    await expect(new RemoteSandboxProvisioner(fake.engine).ensure('zen5')).rejects.toThrow(/does not enforce Landlock.*bubblewrap unavailable/)
+  })
+
+  it('never tries bwrap after a Landlock denial check fails', async () => {
+    const fake = fakeEngine(command => command.includes('--ro')
+      ? { ...ok(), success: false, exitCode: 9 }
+      : happyScript('')(command))
+    await expect(new RemoteSandboxProvisioner(fake.engine).ensure('leaky')).rejects.toThrow('read-only enforcement check failed')
+    expect(fake.commands.some(command => command.includes('command -v bwrap'))).toBe(false)
+  })
+})
+
 describe('RemoteSandboxProvisioner', () => {
   it('provisions, probes, caches, and reuses the deployed launcher', async () => {
     const asset = await runnerAssetFor('linux-x64')
