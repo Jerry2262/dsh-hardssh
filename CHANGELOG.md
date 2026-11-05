@@ -4,12 +4,19 @@
 
 ## 未发布
 
+### 合入上游 0.2.8 的旧 coreutils timeout 降级
+
+- 远端服务端预算包装现在先用零时长 `true` 探测 `timeout -k`，不支持时退回 `timeout -s KILL`：CentOS 6（coreutils 8.4）之前会因 `timeout: invalid option -- 'k'` 返回 125，命令根本没有执行。降级分支在截止时硬杀，客户端自身的终止逻辑不变。
+- 同步更新预算包装测试与 unwrap 辅助（解析第一个 ` -c ` 段）。
+- 上游 0.2.8 其余提交（`ssh_list` schema、0.1.x 兼容矩阵与兼容脚本、Windows Store 终端解析修复）面向本 fork 已删除的运维面或当前 WSL/Linux 运行环境，未合入。
+- 默认套件 **676 通过 + 1 skipped**；typecheck/build 通过。
+
 ### 远端会话改为一句前置说明，不再尝试隐藏远端
 
 - 隐藏远端在本质上不可行：模型有读权限，总能通过文件系统/环境差异发现矛盾。远端绑定会话改为在 system prompt 里得到一句最小事实：工具命令在远端执行环境运行、cwd 就是远端路径、DSH 本体/Web GUI/控制端元数据不在该环境、控制端技能与配置目录仅用于加载且不属于工作区。
 - 远端命令环境不再转发客户端的 `DSH_*` 元数据（HOME 路径、profile、Web URL 等）；本地会话与终端启动路径不受影响。
 - 出站路径改写现在按 `sessionId` 解析会话 cwd，只作用于真正绑定远端工作区的会话；本地会话不会因为存在 SSH 工作区而被改写或清空客户端上下文。
-- 新增/更新测试：前置说明内容、按 cwd 选择 binding、`DSH_*` 显式环境清理；默认套件 **675 通过 + 1 skipped**，typecheck/build 通过。
+- 新增/更新测试：前置说明内容、按 cwd 选择 binding、`DSH_*` 显式环境清理；默认套件 **676 通过 + 1 skipped**，typecheck/build 通过。
 - 测试服务独立化：`DSH_HOME` 增加 `.git` 项目根标记，项目技能发现不再沿 anchor 路径向上找到仓库，`dsh-session-triage` 等开发 skill 不再加载。
 
 ### 会话可见路径与远端 `pwd` 一致
